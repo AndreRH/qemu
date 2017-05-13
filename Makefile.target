@@ -122,6 +122,20 @@ obj-y += gdbstub.o thunk.o
 endif #CONFIG_LINUX_USER
 
 #########################################################
+# Windows user emulator target
+
+ifdef CONFIG_WINDOWS_USER
+
+QEMU_CFLAGS+=-I$(SRC_PATH)/windows-user/$(TARGET_ABI_DIR) \
+             -I$(SRC_PATH)/windows-user/host/$(ARCH) \
+             -I$(SRC_PATH)/windows-user
+
+obj-y += windows-user/
+obj-y += gdbstub.o thunk.o
+
+endif CONFIG_WINDOWS_USER
+
+#########################################################
 # BSD user emulator target
 
 ifdef CONFIG_BSD_USER
