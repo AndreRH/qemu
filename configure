@@ -250,6 +250,12 @@ supported_target() {
                 return 1
             fi
             ;;
+        *-windows-user)
+            if test "$linux" != "yes"; then
+                print_error "Target '$target' is only available on a Linux(!!!) host"
+                return 1
+            fi
+            ;;
         *-bsd-user)
             if test "$bsd" != "yes"; then
                 print_error "Target '$target' is only available on a BSD host"
@@ -424,6 +430,7 @@ profiler="no"
 cocoa="no"
 softmmu="yes"
 linux_user="no"
+windows_user="no"
 bsd_user="no"
 blobs="yes"
 pkgversion=""
@@ -802,6 +809,7 @@ MINGW32*)
   hax="yes"
   vhost_user="no"
   audio_possible_drivers="dsound sdl"
+  windows_user="yes"
   if check_include dsound.h; then
     audio_drv_list="dsound"
   else
@@ -1228,6 +1236,7 @@ for opt do
   --enable-system) softmmu="yes"
   ;;
   --disable-user)
+      windows_user="no" ;
       linux_user="no" ;
       bsd_user="no" ;
   ;;
@@ -1235,6 +1244,10 @@ for opt do
   --disable-linux-user) linux_user="no"
   ;;
   --enable-linux-user) linux_user="yes"
+  ;;
+  --disable-windows-user) windows_user="no"
+  ;;
+  --enable-windows-user) windows_user="yes"
   ;;
   --disable-bsd-user) bsd_user="no"
   ;;
@@ -1631,6 +1644,9 @@ fi
 if [ "$linux_user" = "yes" ]; then
     mak_wilds="${mak_wilds} $source_path/default-configs/*-linux-user.mak"
 fi
+if [ "$windows_user" = "yes" ]; then
+    mak_wilds="${mak_wilds} $source_path/default-configs/*-windows-user.mak"
+fi
 if [ "$bsd_user" = "yes" ]; then
     mak_wilds="${mak_wilds} $source_path/default-configs/*-bsd-user.mak"
 fi
@@ -1747,6 +1763,7 @@ disabled with --disable-FEATURE, default is enabled if available:
   system          all system emulation targets
   user            supported user emulation targets
   linux-user      all linux usermode emulation targets
+  windows-user    all windows usermode emulation targets
   bsd-user        all BSD usermode emulation targets
   docs            build documentation
   guest-agent     build the QEMU Guest Agent
@@ -7442,6 +7459,7 @@ esac
 target_softmmu="no"
 target_user_only="no"
 target_linux_user="no"
+target_windows_user="no"
 target_bsd_user="no"
 case "$target" in
   ${target_name}-softmmu)
@@ -7450,6 +7468,10 @@ case "$target" in
   ${target_name}-linux-user)
     target_user_only="yes"
     target_linux_user="yes"
+    ;;
+  ${target_name}-windows-user)
+    target_user_only="yes"
+    target_windows_user="yes"
     ;;
   ${target_name}-bsd-user)
     target_user_only="yes"
@@ -7733,6 +7755,9 @@ if test "$target_user_only" = "yes" ; then
 fi
 if test "$target_linux_user" = "yes" ; then
   echo "CONFIG_LINUX_USER=y" >> $config_target_mak
+fi
+if test "$target_windows_user" = "yes" ; then
+  echo "CONFIG_WINDOWS_USER=y" >> $config_target_mak
 fi
 list=""
 if test ! -z "$gdb_xml_files" ; then
