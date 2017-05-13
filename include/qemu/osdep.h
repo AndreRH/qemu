@@ -27,6 +27,8 @@
 #ifndef QEMU_OSDEP_H
 #define QEMU_OSDEP_H
 
+#undef _WIN32
+
 #include "config-host.h"
 #ifdef NEED_CPU_H
 #include "config-target.h"

@@ -3,6 +3,9 @@
 #ifndef QEMU_SOCKETS_H
 #define QEMU_SOCKETS_H
 
+#undef _WIN32
+#undef WIN32
+
 #ifdef _WIN32
 
 int inet_aton(const char *cp, struct in_addr *ia);

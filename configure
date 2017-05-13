@@ -570,7 +570,7 @@ ld="${LD-${cross_prefix}ld}"
 ranlib="${RANLIB-${cross_prefix}ranlib}"
 nm="${NM-${cross_prefix}nm}"
 strip="${STRIP-${cross_prefix}strip}"
-windres="${WINDRES-${cross_prefix}windres}"
+windres="${WINDRES-${cross_prefix}wrc}"
 pkg_config_exe="${PKG_CONFIG-${cross_prefix}pkg-config}"
 query_pkg_config() {
     "${pkg_config_exe}" ${QEMU_PKG_CONFIG_FLAGS} "$@"
@@ -3848,6 +3848,7 @@ fi
 ##########################################
 # attr probe
 
+attr=no
 if test "$attr" != "no" ; then
   cat > $TMPC <<EOF
 #include <stdio.h>
@@ -4380,7 +4381,7 @@ int main(void)
 }
 EOF
 if compile_prog "" "" ; then
-  ppoll=yes
+  ppoll=no
 fi
 
 # check for prctl(PR_SET_TIMERSLACK , ... ) support
@@ -4850,7 +4851,7 @@ cat > $TMPC << EOF
 int main(void) { return madvise(NULL, 0, MADV_DONTNEED); }
 EOF
 if compile_prog "" "" ; then
-    madvise=yes
+    madvise=no
 fi
 
 ##########################################
@@ -4863,7 +4864,7 @@ cat > $TMPC << EOF
 int main(void) { return posix_madvise(NULL, 0, POSIX_MADV_DONTNEED); }
 EOF
 if compile_prog "" "" ; then
-    posix_madvise=yes
+    posix_madvise=no
 fi
 
 ##########################################
@@ -5383,7 +5384,7 @@ int main(void) {
 }
 EOF
 if compile_prog "" "" ; then
-    have_fsxattr=yes
+    have_fsxattr=no
 fi
 
 ##########################################
