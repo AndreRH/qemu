@@ -24,20 +24,23 @@
 
 //#define DEBUG_MMAP
 
+static __thread int mmap_lock_count;
+
 void mmap_lock(void)
 {
     qemu_log("mmap_lock unimplemented.\n");
+    mmap_lock_count++;
 }
 
 void mmap_unlock(void)
 {
     qemu_log("mmap_unlock unimplemented.\n");
+    mmap_lock_count--;
 }
 
 bool have_mmap_lock(void)
 {
-    qemu_log("have_mmap_lock unimplemented.\n");
-    return false;
+    return mmap_lock_count > 0 ? true : false;
 }
 
 /* Grab lock to make sure things are in a consistent state after fork().  */
