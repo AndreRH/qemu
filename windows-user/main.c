@@ -40,6 +40,7 @@
 char *exec_path;
 
 int singlestep;
+static const char *filename;
 unsigned long mmap_min_addr;
 unsigned long guest_base;
 int have_guest_base;
@@ -71,12 +72,6 @@ int cpu_get_pic_interrupt(CPUX86State *env)
 {
     qemu_log("cpu_get_pic_interrupt unimplemented.\n");
     return -1;
-}
-
-static void enable_log(void)
-{
-    qemu_log_needs_buffers();
-    qemu_set_log(0xffffffff);
 }
 
 static const char testcode[] =
@@ -137,13 +132,183 @@ static void set_idt(int n, unsigned int dpl)
     set_gate64(idt_table + n * 2, 0, dpl, 0, 0);
 }
 
+static void usage(int exitcode);
+
+static void handle_arg_help(const char *arg)
+{
+    usage(EXIT_SUCCESS);
+}
+
+static void handle_arg_log(const char *arg)
+{
+    int mask;
+
+    mask = qemu_str_to_log_mask(arg);
+    if (!mask)
+    {
+        qemu_print_log_usage(stdout);
+        ExitProcess(EXIT_FAILURE);
+    }
+    qemu_log_needs_buffers();
+    qemu_set_log(mask);
+}
+
+struct qemu_argument
+{
+    const char *argv;
+    const char *env;
+    bool has_arg;
+    void (*handle_opt)(const char *arg);
+    const char *example;
+    const char *help;
+};
+
+static const struct qemu_argument arg_table[] =
+{
+    {"h",          "",                 false, handle_arg_help,
+     "",           "print this help"},
+    {"help",       "",                 false, handle_arg_help,
+     "",           ""},
+    {"d",          "QEMU_LOG",         true,  handle_arg_log,
+     "item[,...]", "enable logging of specified items "
+     "(use '-d help' for a list of items)"},
+    {NULL, NULL, false, NULL, NULL, NULL}
+};
+
+static void usage(int exitcode)
+{
+    const struct qemu_argument *arginfo;
+    int maxarglen;
+    int maxenvlen;
+
+    printf("usage: qemu-" TARGET_NAME " [options] program [arguments...]\n"
+           "Linux CPU emulator (compiled for " TARGET_NAME " emulation)\n"
+           "\n"
+           "Options and associated environment variables:\n"
+           "\n");
+
+    /* Calculate column widths. We must always have at least enough space
+     * for the column header.
+     */
+    maxarglen = strlen("Argument");
+    maxenvlen = strlen("Env-variable");
+
+    for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++)
+    {
+        int arglen = strlen(arginfo->argv);
+        if (arginfo->has_arg)
+        {
+            arglen += strlen(arginfo->example) + 1;
+        }
+        if (strlen(arginfo->env) > maxenvlen)
+        {
+            maxenvlen = strlen(arginfo->env);
+        }
+        if (arglen > maxarglen)
+        {
+            maxarglen = arglen;
+        }
+    }
+
+    printf("%-*s %-*s Description\n", maxarglen+1, "Argument",
+            maxenvlen, "Env-variable");
+
+    for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++)
+    {
+        if (arginfo->has_arg)
+        {
+            printf("-%s %-*s %-*s %s\n", arginfo->argv,
+                   (int)(maxarglen - strlen(arginfo->argv) - 1),
+                   arginfo->example, maxenvlen, arginfo->env, arginfo->help);
+        }
+        else
+        {
+            printf("-%-*s %-*s %s\n", maxarglen, arginfo->argv,
+                    maxenvlen, arginfo->env,
+                    arginfo->help);
+        }
+    }
+
+    ExitProcess(exitcode);
+}
+
+static int parse_args(int argc, char **argv)
+{
+    const char *r;
+    int optind;
+    const struct qemu_argument *arginfo;
+
+    for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
+        if (arginfo->env == NULL) {
+            continue;
+        }
+
+        r = getenv(arginfo->env);
+        if (r != NULL) {
+            arginfo->handle_opt(r);
+        }
+    }
+
+    optind = 1;
+    for (;;) {
+        if (optind >= argc) {
+            break;
+        }
+        r = argv[optind];
+        if (r[0] != '-') {
+            break;
+        }
+        optind++;
+        r++;
+        if (!strcmp(r, "-")) {
+            break;
+        }
+        /* Treat --foo the same as -foo.  */
+        if (r[0] == '-') {
+            r++;
+        }
+
+        for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
+            if (!strcmp(r, arginfo->argv)) {
+                if (arginfo->has_arg) {
+                    if (optind >= argc) {
+                        (void) fprintf(stderr,
+                            "qemu: missing argument for option '%s'\n", r);
+                        ExitProcess(EXIT_FAILURE);
+                    }
+                    arginfo->handle_opt(argv[optind]);
+                    optind++;
+                } else {
+                    arginfo->handle_opt(NULL);
+                }
+                break;
+            }
+        }
+
+        /* no option matched the current argv */
+        if (arginfo->handle_opt == NULL) {
+            (void) fprintf(stderr, "qemu: unknown option '%s'\n", r);
+            ExitProcess(EXIT_FAILURE);
+        }
+    }
+
+    if (optind >= argc) {
+        (void) fprintf(stderr, "qemu: no user program specified\n");
+        ExitProcess(EXIT_FAILURE);
+    }
+
+    filename = argv[optind];
+    exec_path = argv[optind];
+
+    return optind;
+}
+
 int main(int argc, char **argv, char **envp)
 {
     CPUX86State *env;
     CPUState *cpu;
 
-    enable_log();
-    qemu_log("Hello qemu user\n");
+    parse_args(argc, argv);
 
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
@@ -154,7 +319,7 @@ int main(int argc, char **argv, char **envp)
     if (!cpu)
     {
         fprintf(stderr, "Unable to find CPU definition\n");
-        exit(EXIT_FAILURE);
+        ExitProcess(EXIT_FAILURE);
     }
     env = cpu->env_ptr;
     cpu_reset(cpu);
@@ -169,7 +334,7 @@ int main(int argc, char **argv, char **envp)
     if (!(env->features[FEAT_8000_0001_EDX] & CPUID_EXT2_LM))
     {
         fprintf(stderr, "The selected x86 CPU does not support 64 bit mode\n");
-        exit(EXIT_FAILURE);
+        ExitProcess(EXIT_FAILURE);
     }
     env->cr[4] |= CR4_PAE_MASK;
     env->efer |= MSR_EFER_LMA | MSR_EFER_LME;
