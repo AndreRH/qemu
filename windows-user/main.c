@@ -30,12 +30,13 @@
 #include "tcg.h"
 #include "qemu/timer.h"
 #include "qemu/envlist.h"
-#include "elf.h"
 #include "exec/log.h"
 #include "trace/control.h"
 #include "glib-compat.h"
 
 #include <windows.h>
+
+#include "pe.h"
 
 char *exec_path;
 
@@ -73,15 +74,6 @@ int cpu_get_pic_interrupt(CPUX86State *env)
     qemu_log("cpu_get_pic_interrupt unimplemented.\n");
     return -1;
 }
-
-static const char testcode[] =
-{
-    0x48, 0xc7, 0xc0, 0x7b, 0x00, 0x00, 0x00,   /* mov    $0x7b,%rax    */
-    0x48, 0xc7, 0xc3, 0xc8, 0x01, 0x00, 0x00,   /* mov    $0x1c8,%rbx   */
-    0x48, 0xc7, 0xc1, 0x15, 0x03, 0x00, 0x00,   /* mov    $0x315,%rcx   */
-    0x48, 0xf7, 0xe3,                           /* mul    %rbx          */
-    0x0f, 0x05,                                 /* syscall              */
-};
 
 static void cpu_loop(CPUX86State *env)
 {
@@ -307,12 +299,22 @@ int main(int argc, char **argv, char **envp)
 {
     CPUX86State *env;
     CPUState *cpu;
+    HMODULE exe_module;
+    struct qemu_pe_image image;
 
     parse_args(argc, argv);
 
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
+
+    exe_module = qemu_LoadLibraryA(filename);
+    if (!exe_module)
+    {
+        fprintf(stderr, "Failed to load \"%s\", last error %u.\n", filename, GetLastError());
+        ExitProcess(EXIT_FAILURE);
+    }
+    qemu_get_image_info(exe_module, &image);
 
     tcg_exec_init(0);
     cpu = cpu_create(X86_CPU_TYPE_NAME("qemu64"));
@@ -344,7 +346,7 @@ int main(int argc, char **argv, char **envp)
 
     tcg_prologue_init(tcg_ctx);
 
-    env->eip = h2g(testcode);
+    env->eip = h2g(image.entrypoint);
 
     env->idt.limit = 255;
     idt_table = my_alloc(sizeof(uint64_t) * (env->idt.limit + 1));
