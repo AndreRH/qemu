@@ -5996,6 +5996,10 @@ else
     cxx=
 fi
 
+if [ "$windows_user" = yes ]; then
+    textseg_ldflags="-Wl,-Ttext-segment=0x60000000"
+fi
+
 echo_version() {
     if test "$1" = "yes" ; then
         echo "($2)"
