@@ -24,6 +24,10 @@
 
 #include "pe.h"
 
+#define ARRAY_SIZE(a) sizeof(a) / sizeof(*(a))
+
+static HMODULE load_libray(const char *name);
+
 struct nt_header
 {
     DWORD Signature;
@@ -35,7 +39,98 @@ struct nt_header
     } opt;
 };
 
+struct library_cache_entry
+{
+    HMODULE mod;
+    char name[MAX_PATH];
+    unsigned int ref;
+};
+
+static struct library_cache_entry library_cache[128];
+
+static HMODULE qemu_GetModuleHandle(const char *name)
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(library_cache); ++i)
+    {
+        if (!library_cache[i].mod)
+            continue;
+        if (!strcmp(name, library_cache[i].name))
+        {
+            fprintf(stderr, "Already loaded library %s\n", name);
+            library_cache[i].ref++;
+            return library_cache[i].mod;
+        }
+    }
+
+    fprintf(stderr, "Module %s not yet loaded\n", name);
+
+    return NULL;
+}
+
 HMODULE qemu_LoadLibraryA(const char *name)
+{
+    HMODULE ret;
+
+    ret = qemu_GetModuleHandle(name);
+    if (!ret)
+        ret = load_libray(name);
+
+    return ret;
+}
+
+static const void *qemu_GetProcAddress(HMODULE module, const char *name)
+{
+    const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)module;
+    const struct nt_header *nt = (const struct nt_header *)((const char *)dos + dos->e_lfanew);
+    SIZE_T fixed_header_size = 0;
+    unsigned int i;
+    const IMAGE_EXPORT_DIRECTORY *exports = NULL;
+    const IMAGE_SECTION_HEADER *section;
+    const DWORD *names, *functions;
+
+    fixed_header_size = dos->e_lfanew + sizeof(nt->Signature) + sizeof(nt->FileHeader);
+    if (nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
+    {
+        fixed_header_size += sizeof(nt->opt.hdr64);
+    }
+    else
+    {
+        fixed_header_size += sizeof(nt->opt.hdr32);
+    }
+
+    section = (const IMAGE_SECTION_HEADER *)((char *)module + fixed_header_size);
+
+    for (i = 0; i < nt->FileHeader.NumberOfSections; ++i)
+    {
+        if (!memcmp(section[i].Name, ".edata", strlen(".edata")))
+        {
+            exports = (const IMAGE_EXPORT_DIRECTORY *)((char *)module + section[i].VirtualAddress);
+            break;
+        }
+    }
+
+    if (!exports)
+    {
+        fprintf(stderr, "Module has no exports\n");
+        return NULL;
+    }
+
+    names = (DWORD *)((char *)module + exports->AddressOfNames);
+    functions = (DWORD *)((char *)module + exports->AddressOfFunctions);
+    for (i = 0; i < exports->NumberOfFunctions; ++i)
+    {
+        const char *exportname = (const char *)module + names[i];
+        const void *funcptr = (const char *)module + functions[i];
+        if (!strcmp(exportname, name))
+            return funcptr;
+    }
+    fprintf(stderr, "Export %s not found.\n", name);
+    return NULL;
+}
+
+static HMODULE load_libray(const char *name)
 {
     HANDLE file;
     IMAGE_DOS_HEADER dos;
@@ -48,12 +143,27 @@ HMODULE qemu_LoadLibraryA(const char *name)
     unsigned int i;
     void *base = NULL, *alloc;
     const IMAGE_SECTION_HEADER *section;
+    const IMAGE_IMPORT_DESCRIPTOR *imports = NULL;
+
+    if (strlen(name) > (ARRAY_SIZE(library_cache[0].name) - 1))
+    {
+        fprintf(stderr, "Implement proper library name strings.\n");
+        return NULL;
+    }
 
     file = CreateFileA(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (file == INVALID_HANDLE_VALUE)
     {
-        fprintf(stderr, "CreateFileA failed.\n");
-        goto error;
+        char new_name[MAX_PATH + 10];
+
+        /* FIXME: Implement a proper search path system. */
+        sprintf(new_name, "qemu_lib\\%s", name);
+        file = CreateFileA(new_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            fprintf(stderr, "CreateFileA failed.\n");
+            goto error;
+        }
     }
 
     ret = ReadFile(file, &dos, sizeof(dos), &read, NULL);
@@ -228,7 +338,64 @@ HMODULE qemu_LoadLibraryA(const char *name)
         }
         if (protect != PAGE_EXECUTE_READWRITE && !VirtualProtect(alloc, map_size, protect, &old_protect))
             fprintf(stderr, "VirtualProtect failed.\n");
+
+        if (!memcmp(section[i].Name, ".idata", 6))
+            imports = alloc;
     }
+
+    for (i = 0; imports && imports[i].Name; ++i)
+    {
+        HMODULE lib;
+        const char *lib_name = (char *)base + imports[i].Name;
+        fprintf(stderr, "File %s imports library %s\n", name, lib_name);
+        lib = qemu_LoadLibraryA(lib_name);
+        if (!lib)
+        {
+            fprintf(stderr, "Required library %s not found\n", lib_name);
+            goto error;
+        }
+
+        if (nt.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
+        {
+            IMAGE_THUNK_DATA64 *thunk;
+            thunk = (IMAGE_THUNK_DATA64 *)((char *)base + imports[i].FirstThunk);
+
+            while(thunk->u1.Function)
+            {
+                IMAGE_IMPORT_BY_NAME *function_name =
+                        (IMAGE_IMPORT_BY_NAME *)((char *)base + thunk->u1.Function);
+                const void *impl = qemu_GetProcAddress(lib, (const char *)function_name->Name);
+                if (!impl)
+                {
+                    fprintf(stderr, "Imported symbol %s not found in %s.\n",
+                            function_name->Name, lib_name);
+                    goto error;
+                }
+                fprintf(stderr, "writing to %p\n", thunk);
+                *(const void **)thunk = impl; /* FIXME: Why do I need the offset? */
+                thunk++;
+            }
+        }
+        else
+        {
+            fprintf(stderr, "Implement 32 bit imports\n");
+            goto error;
+        }
+    }
+
+    for (i = 0; i < ARRAY_SIZE(library_cache); ++i)
+    {
+        if (!library_cache[i].mod)
+        {
+            library_cache[i].mod = (HMODULE)base;
+            library_cache[i].ref = 1;
+            strcpy(library_cache[i].name, name);
+            break;
+        }
+    }
+
+    if (i == ARRAY_SIZE(library_cache))
+        fprintf(stderr, "Lib cache too small\n");
 
     return (HMODULE)base;
 
