@@ -301,6 +301,7 @@ int main(int argc, char **argv, char **envp)
     CPUState *cpu;
     HMODULE exe_module;
     struct qemu_pe_image image;
+    void *stack;
 
     parse_args(argc, argv);
 
@@ -347,6 +348,21 @@ int main(int argc, char **argv, char **envp)
     tcg_prologue_init(tcg_ctx);
 
     env->eip = h2g(image.entrypoint);
+
+    /* FIXME: I should RESERVE stack_reserve bytes, and commit only stack_commit bytes and
+     * place a guard page at the end of the committed range. This will need exception handing
+     * (and better knowledge in my brain), so commit the entire stack for now.
+     *
+     * Afaics when the reserved area is exhausted an exception is triggered and Windows does
+     * not try to reserve more. Is this correct? */
+    stack = VirtualAlloc(NULL, image.stack_reserve, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!stack)
+    {
+        fprintf(stderr, "Could not reserve stack space.\n");
+        ExitProcess(EXIT_FAILURE);
+    }
+    /* Stack grows down, so point to the end of the allocation. */
+    env->regs[R_ESP] = h2g(stack) + image.stack_reserve;
 
     env->idt.limit = 255;
     idt_table = my_alloc(sizeof(uint64_t) * (env->idt.limit + 1));

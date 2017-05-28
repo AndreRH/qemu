@@ -247,4 +247,6 @@ void qemu_get_image_info(const HMODULE module, struct qemu_pe_image *info)
     const struct nt_header *nt = (const struct nt_header *)((const char *)dos + dos->e_lfanew);
     
     info->entrypoint = (void *)((char *)module) + nt->opt.hdr64.AddressOfEntryPoint;
+    info->stack_reserve = nt->opt.hdr64.SizeOfStackReserve;
+    info->stack_commit = nt->opt.hdr64.SizeOfStackCommit;
 }
