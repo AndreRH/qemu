@@ -16,9 +16,12 @@ struct qemu_syscall
 
 static inline void qemu_syscall(struct qemu_syscall *call)
 {
-    /* TODO: Figure out how to store the call ptr in %rax */
-    /* TODO2: Use an interrupt instruction for win32 */
-    asm("syscall");
+    /* TODO: 32 bit version */
+    asm("mov %%rax, %0\n"
+            "syscall\n"
+            : /* no output - really? call is modified. */
+            : "g"(call)
+            : "%rax");
 }
 
 #define QEMU_SYSCALL_ID(a) ((QEMU_CURRENT_DLL << 32ULL) | (a))

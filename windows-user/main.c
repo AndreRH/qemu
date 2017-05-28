@@ -75,6 +75,8 @@ int cpu_get_pic_interrupt(CPUX86State *env)
     return -1;
 }
 
+#include "windows-user-services.h"
+
 static void cpu_loop(CPUX86State *env)
 {
     CPUState *cs = CPU(x86_env_get_cpu(env));
@@ -82,11 +84,15 @@ static void cpu_loop(CPUX86State *env)
 
     for (;;)
     {
+        const struct qemu_syscall *call;
         cpu_exec_start(cs);
         trapnr = cpu_exec(cs);
         cpu_exec_end(cs);
 
         qemu_log("Got trap nr %x, syscall %x\n", trapnr, EXCP_SYSCALL);
+        call = g2h(env->regs[R_EAX]);
+        fprintf(stderr, "call struct at %p\n", call);
+        fprintf(stderr, "call no %016lx\n", call->id);
         cpu_dump_state(cs, stderr, fprintf, 0);
         break;
     }
