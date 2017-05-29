@@ -27,13 +27,17 @@ static inline void qemu_syscall(struct qemu_syscall *call)
 #define QEMU_SYSCALL_ID(a) ((QEMU_CURRENT_DLL << 32ULL) | (a))
 
 #ifndef QEMU_DLL_GUEST
-/* typedef the register export */
-/* typedef the host-side call implementation function */
-/* typedef the syscall array */
+
+struct qemu_ops
+{
+    int dummy;
+};
+
+typedef void (*syscall_handler)(struct qemu_syscall *call);
+typedef const syscall_handler *(WINAPI *syscall_lib_register)(const struct qemu_ops *ops, uint32_t *dll_num);
 
 struct qemu_op
 {
-    void *register_dll;
     void *load_library;
     void *get_proc_address;
     /* etc */
