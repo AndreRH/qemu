@@ -34,9 +34,8 @@
 #include "trace/control.h"
 #include "glib-compat.h"
 
-#include <windows.h>
-
 #include "pe.h"
+#include "win_syscall.h"
 
 char *exec_path;
 
@@ -46,11 +45,6 @@ unsigned long mmap_min_addr;
 unsigned long guest_base;
 int have_guest_base;
 unsigned long reserved_va;
-
-static inline void *my_alloc(size_t s)
-{
-    return HeapAlloc(GetProcessHeap(), 0, s);
-}
 
 bool qemu_cpu_is_self(CPUState *cpu)
 {
@@ -75,8 +69,6 @@ int cpu_get_pic_interrupt(CPUX86State *env)
     return -1;
 }
 
-#include "windows-user-services.h"
-
 static void cpu_loop(CPUX86State *env)
 {
     CPUState *cs = CPU(x86_env_get_cpu(env));
@@ -84,17 +76,21 @@ static void cpu_loop(CPUX86State *env)
 
     for (;;)
     {
-        const struct qemu_syscall *call;
         cpu_exec_start(cs);
         trapnr = cpu_exec(cs);
         cpu_exec_end(cs);
 
-        qemu_log("Got trap nr %x, syscall %x\n", trapnr, EXCP_SYSCALL);
-        call = g2h(env->regs[R_EAX]);
-        fprintf(stderr, "call struct at %p\n", call);
-        fprintf(stderr, "call no %016lx\n", call->id);
-        cpu_dump_state(cs, stderr, fprintf, 0);
-        break;
+        switch (trapnr)
+        {
+            case EXCP_SYSCALL:
+                do_syscall(g2h(env->regs[R_EAX]));
+                continue;
+
+            default:
+                fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
+                cpu_dump_state(cs, stderr, fprintf, 0);
+                return;
+        }
     }
 }
 
@@ -322,6 +318,12 @@ int main(int argc, char **argv, char **envp)
         ExitProcess(EXIT_FAILURE);
     }
     qemu_get_image_info(exe_module, &image);
+
+    if (!load_host_dlls())
+    {
+        fprintf(stderr, "Failed to load host DLLs\n");
+        ExitProcess(EXIT_FAILURE);
+    }
 
     tcg_exec_init(0);
     cpu = cpu_create(X86_CPU_TYPE_NAME("qemu64"));
