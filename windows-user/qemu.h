@@ -2,6 +2,7 @@
 #define QEMU_H
 
 #include <asm-generic/int-ll64.h>
+#include <windows.h>
 
 #include "hostdep.h"
 #include "cpu.h"
@@ -142,5 +143,10 @@ typedef struct TaskState
     int signal_pending;
 
 } __attribute__((aligned(16))) TaskState;
+
+static inline void *my_alloc(size_t s)
+{
+    return HeapAlloc(GetProcessHeap(), 0, s);
+}
 
 #endif /* QEMU_H */
