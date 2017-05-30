@@ -160,7 +160,7 @@ static HMODULE load_libray(const char *name)
         char new_name[MAX_PATH + 10];
 
         /* FIXME: Implement a proper search path system. */
-        sprintf(new_name, "qemu_lib\\%s", name);
+        sprintf(new_name, "qemu_guest_dll\\%s", name);
         file = CreateFileA(new_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
         if (file == INVALID_HANDLE_VALUE)
         {
