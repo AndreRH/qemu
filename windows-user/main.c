@@ -420,7 +420,6 @@ int main(int argc, char **argv, char **envp)
     cpu_x86_load_seg(env, R_GS, 0);
 
     qemu_log("CPU Setup done\n");
-    cpu_dump_state(cpu, stderr, fprintf, 0);
 
     cpu_loop(env);
 

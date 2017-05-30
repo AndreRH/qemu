@@ -22,9 +22,12 @@
 #include <windows.h>
 #include <winternl.h>
 
-#include "pe.h"
+#include "qemu/osdep.h"
+#include "qemu-version.h"
 
-#define ARRAY_SIZE(a) sizeof(a) / sizeof(*(a))
+#include "qapi/error.h"
+#include "qemu.h"
+#include "pe.h"
 
 static HMODULE load_libray(const char *name);
 
@@ -58,13 +61,13 @@ static HMODULE qemu_GetModuleHandle(const char *name)
             continue;
         if (!strcmp(name, library_cache[i].name))
         {
-            fprintf(stderr, "Already loaded library %s\n", name);
+            qemu_log_mask(LOG_WIN32, "Already loaded library %s\n", name);
             library_cache[i].ref++;
             return library_cache[i].mod;
         }
     }
 
-    fprintf(stderr, "Module %s not yet loaded\n", name);
+    qemu_log_mask(LOG_WIN32, "Module %s not yet loaded\n", name);
 
     return NULL;
 }
@@ -161,7 +164,7 @@ static HMODULE load_libray(const char *name)
         file = CreateFileA(new_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
         if (file == INVALID_HANDLE_VALUE)
         {
-            fprintf(stderr, "CreateFileA failed.\n");
+            qemu_log_mask(LOG_WIN32, "CreateFileA failed.\n");
             goto error;
         }
     }
@@ -238,16 +241,14 @@ static HMODULE load_libray(const char *name)
      * the file and alloc+read the rest. We'd probably manage headers + .text, which
      * I expect to be the majority of the file. */
 
-    fprintf(stderr, "Trying to map file size %lu at %p.\n", (unsigned long)image_size, image_base);
+    qemu_log_mask(LOG_WIN32, "Trying to map file size %lu at %p.\n", (unsigned long)image_size, image_base);
     base = VirtualAlloc(image_base, image_size, MEM_RESERVE, PAGE_READONLY);
-    fprintf(stderr, "Got %p\n", base);
+    qemu_log_mask(LOG_WIN32, "Got %p\n", base);
     if (!base)
     {
         fprintf(stderr, "FIXME: Implement relocations!\n");
         goto error;
     }
-    if (base != image_base)
-        fprintf(stderr, "Unexpected!\n");
 
     alloc = VirtualAlloc(base, header_size, MEM_COMMIT, PAGE_READWRITE);
     if (!alloc)
@@ -265,13 +266,13 @@ static HMODULE load_libray(const char *name)
     /* TODO: Write-protect the headers. */
 
     section = (const IMAGE_SECTION_HEADER *)((char *)base + fixed_header_size);
-    fprintf(stderr, "Got %u sections at %p\n", nt.FileHeader.NumberOfSections, section);
+    qemu_log_mask(LOG_WIN32, "Got %u sections at %p\n", nt.FileHeader.NumberOfSections, section);
 
     for (i = 0; i < nt.FileHeader.NumberOfSections; i++)
     {
         void *location = ((char *)base + section[i].VirtualAddress);
         SIZE_T map_size = section[i].Misc.VirtualSize;
-        fprintf(stderr, "Mapping section %8s at %p.\n", section[i].Name, location);
+        qemu_log_mask(LOG_WIN32, "Mapping section %8s at %p.\n", section[i].Name, location);
         DWORD protect, old_protect;
 
         alloc = VirtualAlloc(location, map_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
@@ -283,7 +284,7 @@ static HMODULE load_libray(const char *name)
 
         if (section[i].SizeOfRawData)
         {
-            fprintf(stderr, "Reading %8s from 0x%x to %p.\n",
+            qemu_log_mask(LOG_WIN32, "Reading %8s from 0x%x to %p.\n",
                     section[i].Name, section[i].PointerToRawData, location);
 
             SetFilePointer(file, section[i].PointerToRawData, NULL, FILE_BEGIN);
@@ -302,33 +303,33 @@ static HMODULE load_libray(const char *name)
                 & (IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_MEM_EXECUTE))
         {
             case IMAGE_SCN_MEM_READ:
-                fprintf(stderr, "Section %s is read-only.\n", section[i].Name);
+                qemu_log_mask(LOG_WIN32, "Section %s is read-only.\n", section[i].Name);
                 protect = PAGE_READONLY;
                 break;
             case IMAGE_SCN_MEM_WRITE:
-                fprintf(stderr, "Section %s is write-only.\n", section[i].Name);
+                qemu_log_mask(LOG_WIN32, "Section %s is write-only.\n", section[i].Name);
                 protect = PAGE_READWRITE;
                 break;
             case IMAGE_SCN_MEM_EXECUTE:
-                fprintf(stderr, "Section %s is execute-only.\n", section[i].Name);
+                qemu_log_mask(LOG_WIN32, "Section %s is execute-only.\n", section[i].Name);
                 protect = PAGE_EXECUTE;
                 break;
 
             case IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE:
-                fprintf(stderr, "Section %s is read-write.\n", section[i].Name);
+                qemu_log_mask(LOG_WIN32, "Section %s is read-write.\n", section[i].Name);
                 protect = PAGE_READWRITE;
                 break;
             case IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE:
-                fprintf(stderr, "Section %s is read-execute.\n", section[i].Name);
+                qemu_log_mask(LOG_WIN32, "Section %s is read-execute.\n", section[i].Name);
                 protect = PAGE_EXECUTE_READ;
                 break;
             case IMAGE_SCN_MEM_WRITE | IMAGE_SCN_MEM_EXECUTE:
-                fprintf(stderr, "Section %s is write-execute.\n", section[i].Name);
+                qemu_log_mask(LOG_WIN32, "Section %s is write-execute.\n", section[i].Name);
                 protect = PAGE_EXECUTE_READWRITE;
                 break;
 
             case IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_MEM_EXECUTE:
-                fprintf(stderr, "Section %s is read-write-execute.\n", section[i].Name);
+                qemu_log_mask(LOG_WIN32, "Section %s is read-write-execute.\n", section[i].Name);
                 protect = PAGE_EXECUTE_READWRITE;
                 break;
 
@@ -347,7 +348,7 @@ static HMODULE load_libray(const char *name)
     {
         HMODULE lib;
         const char *lib_name = (char *)base + imports[i].Name;
-        fprintf(stderr, "File %s imports library %s\n", name, lib_name);
+        qemu_log_mask(LOG_WIN32, "File %s imports library %s\n", name, lib_name);
         lib = qemu_LoadLibraryA(lib_name);
         if (!lib)
         {
@@ -371,7 +372,7 @@ static HMODULE load_libray(const char *name)
                             function_name->Name, lib_name);
                     goto error;
                 }
-                fprintf(stderr, "writing to %p\n", thunk);
+                qemu_log_mask(LOG_WIN32, "writing to %p\n", thunk);
                 *(const void **)thunk = impl; /* FIXME: Why do I need the offset? */
                 thunk++;
             }

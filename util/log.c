@@ -274,6 +274,8 @@ const QEMULogItem qemu_log_items[] = {
     { CPU_LOG_TB_NOCHAIN, "nochain",
       "do not chain compiled TBs so that \"exec\" and \"cpu\" show\n"
       "complete traces" },
+    { LOG_WIN32, "win32",
+      "Show log putput specific to win32 user mode handling\n" },
     { 0, NULL, NULL },
 };
 
