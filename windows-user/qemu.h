@@ -149,4 +149,9 @@ static inline void *my_alloc(size_t s)
     return HeapAlloc(GetProcessHeap(), 0, s);
 }
 
+static inline void my_free(void *p)
+{
+    HeapFree(GetProcessHeap(), 0, p);
+}
+
 #endif /* QEMU_H */
