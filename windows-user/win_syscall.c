@@ -44,7 +44,7 @@ BOOL load_host_dlls(void)
     {
         syscall_lib_register fn;
 
-        HANDLE h = LoadLibraryA("qemu_host_lib\\qemu_kernel32.dll.so");
+        HANDLE h = LoadLibraryA("qemu_host_dll\\qemu_kernel32.dll.so");
         if (!h)
         {
             fprintf(stderr, "Unable to load library\n");
