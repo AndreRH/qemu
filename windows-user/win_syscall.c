@@ -71,7 +71,7 @@ void do_syscall(struct qemu_syscall *call)
     uint32_t dll = call->id >> 32;
     uint32_t func = call->id & 0xffffffff;
     
-    fprintf(stderr, "Handling syscall %16lx\n", call->id);
+    qemu_log_mask(LOG_WIN32, "Handling syscall %16lx\n", call->id);
     
     dlls[dll][func](call);
 }
