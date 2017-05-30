@@ -23,7 +23,13 @@
 #include "qemu.h"
 #include "win_syscall.h"
 
-static const syscall_handler **dlls;
+struct load_host_dlls
+{
+    const syscall_handler *handlers;
+    HANDLE module;
+};
+
+static struct load_host_dlls *dlls;
 static unsigned int dll_count;
 
 static const struct qemu_ops ops =
@@ -35,35 +41,85 @@ BOOL load_host_dlls(void)
 {
     const syscall_handler *handlers;
     uint32_t dll_num;
+    unsigned int loaded_dlls = 0;
+    WIN32_FIND_DATAA find_data;
+    HANDLE find_handle;
+    const syscall_handler **new_ptr;
+    char path[MAX_PATH];
     
-    dlls = my_alloc(sizeof(*dlls) * 2);
+    dll_count = 2;
+    dlls = my_alloc(sizeof(*dlls) * dll_count);
     if (!dlls)
         return FALSE;
-    
+    memset(dlls, 0, sizeof(*dlls) * dll_count);
+
+    find_handle = FindFirstFileA("qemu_host_dll\\*", &find_data);
+    if (find_handle == INVALID_HANDLE_VALUE)
+    {
+        goto error;
+    }
+
     do
     {
         syscall_lib_register fn;
 
-        HANDLE h = LoadLibraryA("qemu_host_dll\\qemu_kernel32.dll.so");
+        if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+
+        sprintf(path, "qemu_host_dll\\%s", find_data.cFileName);
+        HANDLE h = LoadLibraryA(path);
         if (!h)
         {
-            fprintf(stderr, "Unable to load library\n");
-            return FALSE;
+            fprintf(stderr, "Unable to load library %s.\n", path);
+            continue;
         }
         
         fn = (syscall_lib_register)GetProcAddress(h, "qemu_dll_register");
         if (!fn)
         {
             fprintf(stderr, "No register export\n");
-            return FALSE;
+            FreeLibrary(h);
+            continue;
         }
         
-         handlers = fn(&ops, &dll_num);
-         dlls[dll_num] = handlers;
-    } while(0);
-    dll_count = 1;
-    
-    return TRUE;
+        handlers = fn(&ops, &dll_num);
+
+        if (dll_count <= dll_num)
+        {
+            new_ptr = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, dlls, sizeof(*dlls) * (dll_num + 1));
+            if (!new_ptr)
+            {
+                fprintf(stderr, "Out of memory.\n");
+                FreeLibrary(h);
+                FindClose(find_handle);
+                goto error;
+            }
+            dll_count = dll_num + 1;
+        }
+
+        dlls[dll_num].handlers = handlers;
+        dlls[dll_num].module = h;
+        loaded_dlls++;
+    }
+    while(FindNextFile(find_handle, &find_data));
+
+    FindClose(find_handle);
+
+    if (loaded_dlls)
+        return TRUE;
+
+    fprintf(stderr, "Did not manage to load any host DLLs.\n");
+
+error:
+    for (loaded_dlls = 0; loaded_dlls < dll_count; ++loaded_dlls)
+    {
+        if (dlls[loaded_dlls].module)
+            FreeLibrary(dlls[loaded_dlls].module);
+    }
+
+    if (dlls)
+        my_free(dlls);
+    return FALSE;
 }
 
 void do_syscall(struct qemu_syscall *call)
@@ -73,5 +129,5 @@ void do_syscall(struct qemu_syscall *call)
     
     qemu_log_mask(LOG_WIN32, "Handling syscall %16lx\n", call->id);
     
-    dlls[dll][func](call);
+    dlls[dll].handlers[func](call);
 }
