@@ -133,6 +133,55 @@ static const void *qemu_GetProcAddress(HMODULE module, const char *name)
     return NULL;
 }
 
+static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports)
+{
+    unsigned int i;
+    const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)module;
+    const struct nt_header *nt = (const struct nt_header *)((const char *)dos + dos->e_lfanew);
+
+    for (i = 0; imports && imports[i].Name; ++i)
+    {
+        HMODULE lib;
+        const char *lib_name = (char *)module + imports[i].Name;
+        qemu_log_mask(LOG_WIN32, "Module imports library %s\n", lib_name);
+        lib = qemu_LoadLibraryA(lib_name);
+        if (!lib)
+        {
+            fprintf(stderr, "Required library %s not found\n", lib_name);
+            return FALSE;
+        }
+
+        if (nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
+        {
+            IMAGE_THUNK_DATA64 *thunk;
+            thunk = (IMAGE_THUNK_DATA64 *)((char *)module + imports[i].FirstThunk);
+
+            while(thunk->u1.Function)
+            {
+                IMAGE_IMPORT_BY_NAME *function_name =
+                        (IMAGE_IMPORT_BY_NAME *)((char *)module + thunk->u1.Function);
+                const void *impl = qemu_GetProcAddress(lib, (const char *)function_name->Name);
+                if (!impl)
+                {
+                    fprintf(stderr, "Imported symbol %s not found in %s.\n",
+                            function_name->Name, lib_name);
+                    return FALSE;
+                }
+                qemu_log_mask(LOG_WIN32, "writing to %p\n", thunk);
+                *(const void **)thunk = impl; /* FIXME: Why do I need the offset? */
+                thunk++;
+            }
+        }
+        else
+        {
+            fprintf(stderr, "Implement 32 bit imports\n");
+            return FALSE;
+        }
+    }
+    
+    return TRUE;
+}
+
 static HMODULE load_libray(const char *name)
 {
     HANDLE file;
@@ -344,51 +393,14 @@ static HMODULE load_libray(const char *name)
             imports = alloc;
     }
 
-    for (i = 0; imports && imports[i].Name; ++i)
-    {
-        HMODULE lib;
-        const char *lib_name = (char *)base + imports[i].Name;
-        qemu_log_mask(LOG_WIN32, "File %s imports library %s\n", name, lib_name);
-        lib = qemu_LoadLibraryA(lib_name);
-        if (!lib)
-        {
-            fprintf(stderr, "Required library %s not found\n", lib_name);
-            goto error;
-        }
-
-        if (nt.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
-        {
-            IMAGE_THUNK_DATA64 *thunk;
-            thunk = (IMAGE_THUNK_DATA64 *)((char *)base + imports[i].FirstThunk);
-
-            while(thunk->u1.Function)
-            {
-                IMAGE_IMPORT_BY_NAME *function_name =
-                        (IMAGE_IMPORT_BY_NAME *)((char *)base + thunk->u1.Function);
-                const void *impl = qemu_GetProcAddress(lib, (const char *)function_name->Name);
-                if (!impl)
-                {
-                    fprintf(stderr, "Imported symbol %s not found in %s.\n",
-                            function_name->Name, lib_name);
-                    goto error;
-                }
-                qemu_log_mask(LOG_WIN32, "writing to %p\n", thunk);
-                *(const void **)thunk = impl; /* FIXME: Why do I need the offset? */
-                thunk++;
-            }
-        }
-        else
-        {
-            fprintf(stderr, "Implement 32 bit imports\n");
-            goto error;
-        }
-    }
-
+    if (!fixup_imports(base, imports))
+        goto error;
+    
     for (i = 0; i < ARRAY_SIZE(library_cache); ++i)
     {
         if (!library_cache[i].mod)
         {
-            library_cache[i].mod = (HMODULE)base;
+            library_cache[i].mod = base;
             library_cache[i].ref = 1;
             strcpy(library_cache[i].name, name);
             break;
@@ -398,7 +410,7 @@ static HMODULE load_libray(const char *name)
     if (i == ARRAY_SIZE(library_cache))
         fprintf(stderr, "Lib cache too small\n");
 
-    return (HMODULE)base;
+    return base;
 
 error:
     if (base)
