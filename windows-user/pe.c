@@ -64,7 +64,7 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const char *name)
     {
         if (!library_cache[i].mod)
             continue;
-        if (!strcmp(name, library_cache[i].name))
+        if (!strcasecmp(name, library_cache[i].name))
         {
             qemu_log_mask(LOG_WIN32, "Already loaded library %s\n", name);
             if (!(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
