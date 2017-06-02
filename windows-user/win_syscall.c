@@ -22,6 +22,7 @@
 #include "qapi/error.h"
 #include "qemu.h"
 #include "win_syscall.h"
+#include "pe.h"
 
 struct load_host_dlls
 {
@@ -34,8 +35,9 @@ static unsigned int dll_count;
 
 static const struct qemu_ops ops =
 {
-    NULL,
-    NULL,
+    qemu_GetModuleHandleEx,
+    qemu_GetProcAddress,
+    qemu_FreeLibrary,
 };
 
 BOOL load_host_dlls(void)
