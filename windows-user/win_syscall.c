@@ -34,7 +34,8 @@ static unsigned int dll_count;
 
 static const struct qemu_ops ops =
 {
-    12345
+    NULL,
+    NULL,
 };
 
 BOOL load_host_dlls(void)
