@@ -37,6 +37,11 @@ struct qemu_ops
 typedef void (*syscall_handler)(struct qemu_syscall *call);
 typedef const syscall_handler *(WINAPI *syscall_lib_register)(const struct qemu_ops *ops, uint32_t *dll_num);
 
+/* For now this is just a placeholder that is used to mark places where we're taking a guest pointer and
+ * need a host pointer. It has the practical purpose of shutting up the int to ptr conversion warning. If
+ * we ever have a diverging address space this will probably call into qemu_ops. */
+#define QEMU_G2H(a)((void *)(a))
+
 #endif
 
 #endif
