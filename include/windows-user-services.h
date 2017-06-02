@@ -30,8 +30,9 @@ static inline void qemu_syscall(struct qemu_syscall *call)
 
 struct qemu_ops
 {
-    void *load_library;
-    void *get_proc_address;
+    HMODULE (*qemu_GetModuleHandleEx)(DWORD flags, const char *name);
+    const void *(*qemu_GetProcAddress)(HMODULE module, const char *name);
+    BOOL (*qemu_FreeLibrary)(HMODULE module);
 };
 
 typedef void (*syscall_handler)(struct qemu_syscall *call);

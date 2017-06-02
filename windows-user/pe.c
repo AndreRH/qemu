@@ -51,9 +51,14 @@ struct library_cache_entry
 
 static struct library_cache_entry library_cache[128];
 
-static HMODULE qemu_GetModuleHandle(const char *name)
+HMODULE qemu_GetModuleHandleEx(DWORD flags, const char *name)
 {
     unsigned int i;
+
+    if (flags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS)
+        fprintf(stderr, "GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS not implemented\n");
+    if (flags & GET_MODULE_HANDLE_EX_FLAG_PIN)
+        fprintf(stderr, "GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS not implemented\n");
 
     for (i = 0; i < ARRAY_SIZE(library_cache); ++i)
     {
@@ -62,7 +67,8 @@ static HMODULE qemu_GetModuleHandle(const char *name)
         if (!strcmp(name, library_cache[i].name))
         {
             qemu_log_mask(LOG_WIN32, "Already loaded library %s\n", name);
-            library_cache[i].ref++;
+            if (!(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
+                library_cache[i].ref++;
             return library_cache[i].mod;
         }
     }
@@ -76,14 +82,14 @@ HMODULE qemu_LoadLibraryA(const char *name)
 {
     HMODULE ret;
 
-    ret = qemu_GetModuleHandle(name);
+    ret = qemu_GetModuleHandleEx(0, name);
     if (!ret)
         ret = load_libray(name);
 
     return ret;
 }
 
-static const void *qemu_GetProcAddress(HMODULE module, const char *name)
+const void *qemu_GetProcAddress(HMODULE module, const char *name)
 {
     const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)module;
     const struct nt_header *nt = (const struct nt_header *)((const char *)dos + dos->e_lfanew);
@@ -429,4 +435,10 @@ void qemu_get_image_info(const HMODULE module, struct qemu_pe_image *info)
     info->entrypoint = (void *)((char *)module) + nt->opt.hdr64.AddressOfEntryPoint;
     info->stack_reserve = nt->opt.hdr64.SizeOfStackReserve;
     info->stack_commit = nt->opt.hdr64.SizeOfStackCommit;
+}
+
+BOOL qemu_FreeLibrary(HMODULE module)
+{
+    fprintf(stderr, "FreeLibrary unimplemented\n");
+    return TRUE;
 }
