@@ -133,7 +133,7 @@ QEMU_CFLAGS+=-I$(SRC_PATH)/windows-user/$(TARGET_ABI_DIR) \
 obj-y += windows-user/
 obj-y += gdbstub.o thunk.o
 
-endif CONFIG_WINDOWS_USER
+endif
 
 #########################################################
 # BSD user emulator target
