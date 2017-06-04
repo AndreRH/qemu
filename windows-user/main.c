@@ -208,6 +208,7 @@ static void cpu_loop(const void *code)
     CPUState *cs;
     CPUX86State *env;
     int trapnr;
+    void *syscall;
 
     cs = thread_cpu;
     env = cs->env_ptr;
@@ -223,11 +224,11 @@ static void cpu_loop(const void *code)
         switch (trapnr)
         {
             case EXCP_SYSCALL:
-                do_syscall(g2h(env->regs[R_ECX]));
+                syscall = g2h(env->regs[R_ECX]);
+                if (!syscall) /* Return from guest to host. */
+                    return;
+                do_syscall(syscall);
                 continue;
-
-            case 0x6: /* sysret */
-                return;
 
             default:
                 fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
@@ -237,7 +238,11 @@ static void cpu_loop(const void *code)
     }
 }
 
-static const char sysretq[] = {0x48, 0x0f, 0x07};
+static const char ret_code[] =
+{
+    0x48, 0x31, 0xc9,   /* xor %rcx, %rcx */
+    0x0f, 0x05          /* syscall        */
+};
 
 uint64_t qemu_execute(const void *code, uint64_t rcx)
 {
@@ -252,8 +257,8 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
      * We need to make sure the emulated CPU interrupts execution after the called function
      * returns and cpu_loop() returns as well. cpu_loop should not return if the function executes
      * a syscall. To achieve that, we push a return address into the guest stack that points to
-     * an sysretq instruction. The sysretq will interrupt the CPU and cpu_loop recognizes the
-     * trap and returns gracefully.
+     * an syscall(rcx=0) instruction. The this interrupt the CPU and cpu_loop recognizes the
+     * zero value and returns gracefully.
      *
      * Afterwards restore registers and read the return value from EAX / RAX. */
     cs = thread_cpu;
@@ -273,8 +278,8 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
 
     /* FIXME: This is 64 bit specific. Implement the 32 bit WINAPI calling convention too. */
     env->regs[R_ESP] -= 0x28; /* Reserve 32 bytes + 8 for the return address. */
-    /* Write the address of our iret call onto the stack. */
-    *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(sysretq);
+    /* Write the address of our return code onto the stack. */
+    *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
 
     qemu_log("Going to call guest code %p.\n", code);
     cpu_loop(code);
