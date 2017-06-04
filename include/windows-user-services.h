@@ -16,7 +16,16 @@ struct qemu_syscall
 
 static inline void qemu_syscall(struct qemu_syscall *call)
 {
-    /* TODO: 32 bit version */
+    /* TODO: 32 bit version.
+     *
+     * Call should already be in rcx due to the calling convention.
+     * But the compiler may do something between function entry and
+     * the syscall. Move call into rcx and let the optimizer fix
+     * the redundant copy.
+     *
+     * FIXME 2: Apparently the optimizer doesn't know what I am
+     * doing here and optimizes everything except the syscall and
+     * retq away from most functions. */
     asm("mov %%rcx, %0\n"
             "syscall\n"
             : /* no output - really? call is modified. */
