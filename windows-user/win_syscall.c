@@ -27,7 +27,7 @@
 struct load_host_dlls
 {
     const syscall_handler *handlers;
-    HANDLE module;
+    HMODULE module;
 };
 
 static struct load_host_dlls *dlls;
@@ -47,7 +47,7 @@ BOOL load_host_dlls(void)
     unsigned int loaded_dlls = 0;
     WIN32_FIND_DATAA find_data;
     HANDLE find_handle;
-    const syscall_handler **new_ptr;
+    struct load_host_dlls *new_ptr;
     char path[MAX_PATH];
     
     dll_count = 2;
@@ -69,19 +69,20 @@ BOOL load_host_dlls(void)
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             continue;
 
-        sprintf(path, "qemu_host_dll\\%s", find_data.cFileName);
-        HANDLE h = LoadLibraryA(path);
-        if (!h)
+        sprintf(path, "qemu_host_dll\\%s.", find_data.cFileName);
+        qemu_log_mask(LOG_WIN32, "trying to load %s\n", path);
+        HMODULE mod = LoadLibraryA(path);
+        if (!mod)
         {
             fprintf(stderr, "Unable to load library %s.\n", path);
             continue;
         }
         
-        fn = (syscall_lib_register)GetProcAddress(h, "qemu_dll_register");
+        fn = (syscall_lib_register)GetProcAddress(mod, "qemu_dll_register");
         if (!fn)
         {
             fprintf(stderr, "No register export\n");
-            FreeLibrary(h);
+            FreeLibrary(mod);
             continue;
         }
         
@@ -93,15 +94,17 @@ BOOL load_host_dlls(void)
             if (!new_ptr)
             {
                 fprintf(stderr, "Out of memory.\n");
-                FreeLibrary(h);
+                FreeLibrary(mod);
                 FindClose(find_handle);
                 goto error;
             }
+            dlls = new_ptr;
             dll_count = dll_num + 1;
         }
 
+        qemu_log_mask(LOG_WIN32, "Registered DLL %s with number %u.\n", path, dll_num);
         dlls[dll_num].handlers = handlers;
-        dlls[dll_num].module = h;
+        dlls[dll_num].module = mod;
         loaded_dlls++;
     }
     while(FindNextFile(find_handle, &find_data));
@@ -129,8 +132,8 @@ void do_syscall(struct qemu_syscall *call)
 {
     uint32_t dll = call->id >> 32;
     uint32_t func = call->id & 0xffffffff;
-    
-    qemu_log_mask(LOG_WIN32, "Handling syscall %16lx\n", call->id);
-    
+
+    qemu_log_mask(LOG_WIN32, "Handling syscall %16lx.\n", call->id);
+
     dlls[dll].handlers[func](call);
 }
