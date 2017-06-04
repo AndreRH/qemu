@@ -93,7 +93,7 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
 {
     const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)module;
     const struct nt_header *nt = (const struct nt_header *)((const char *)dos + dos->e_lfanew);
-    SIZE_T fixed_header_size = 0;
+    SIZE_T fixed_header_size = 0, export_size;
     unsigned int i;
     const IMAGE_EXPORT_DIRECTORY *exports = NULL;
     const IMAGE_SECTION_HEADER *section;
@@ -116,6 +116,7 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
         if (!memcmp(section[i].Name, ".edata", strlen(".edata")))
         {
             exports = (const IMAGE_EXPORT_DIRECTORY *)((char *)module + section[i].VirtualAddress);
+            export_size = section[i].Misc.VirtualSize;
             break;
         }
     }
@@ -133,7 +134,40 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
         const char *exportname = (const char *)module + names[i];
         const void *funcptr = (const char *)module + functions[i];
         if (!strcmp(exportname, name))
+        {
+            if ((const char *)funcptr >= (const char *)exports &&
+                    (const char *)funcptr < (const char *)exports + export_size)
+            {
+                char *copy = strdup((const char *)funcptr);
+                char *func, *dll;
+
+                qemu_log_mask(LOG_WIN32, "Export %s is a forward to %s!\n", name, copy);
+                func = strrchr(copy, '.');
+                *func = 0;
+                func++;
+                qemu_log_mask(LOG_WIN32, "Dll %s export %s\n", copy, func);
+
+                dll = my_alloc(strlen(copy) + 3);
+                strcpy(dll, copy);
+                strcat(dll, ".dll");
+                module = qemu_GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, dll);
+                my_free(dll);
+                if (module)
+                {
+                    funcptr = qemu_GetProcAddress(module, func);
+                    qemu_log_mask(LOG_WIN32, "Found export %s in DLL %s.dll(%p)\n", func, copy, module);
+                }
+                else
+                {
+                    fprintf(stderr, "Module %s.dll for forwarded export %s.%s not found.\n", copy,
+                            copy, func);
+                    funcptr = NULL;
+                }
+
+                free(copy);
+            }
             return funcptr;
+        }
     }
     fprintf(stderr, "Export %s not found.\n", name);
     return NULL;
