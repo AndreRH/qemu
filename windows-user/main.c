@@ -45,6 +45,9 @@ unsigned long mmap_min_addr;
 unsigned long guest_base;
 int have_guest_base;
 unsigned long reserved_va;
+static struct qemu_pe_image image;
+
+__thread CPUState *thread_cpu;
 
 bool qemu_cpu_is_self(CPUState *cpu)
 {
@@ -67,31 +70,6 @@ int cpu_get_pic_interrupt(CPUX86State *env)
 {
     qemu_log("cpu_get_pic_interrupt unimplemented.\n");
     return -1;
-}
-
-static void cpu_loop(CPUX86State *env)
-{
-    CPUState *cs = CPU(x86_env_get_cpu(env));
-    int trapnr;
-
-    for (;;)
-    {
-        cpu_exec_start(cs);
-        trapnr = cpu_exec(cs);
-        cpu_exec_end(cs);
-
-        switch (trapnr)
-        {
-            case EXCP_SYSCALL:
-                do_syscall(g2h(env->regs[R_EAX]));
-                continue;
-
-            default:
-                fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
-                cpu_dump_state(cs, stderr, fprintf, 0);
-                return;
-        }
-    }
 }
 
 static void write_dt(void *ptr, unsigned long addr, unsigned long limit,
@@ -124,6 +102,147 @@ static void set_gate64(void *ptr, unsigned int type, unsigned int dpl,
 static void set_idt(int n, unsigned int dpl)
 {
     set_gate64(idt_table + n * 2, 0, dpl, 0, 0);
+}
+
+static void init_thread_cpu(void)
+{
+    CPUX86State *env;
+    void *stack;
+    CPUState *cpu;
+
+    cpu = cpu_create(X86_CPU_TYPE_NAME("qemu64"));
+    if (!cpu)
+    {
+        fprintf(stderr, "Unable to find CPU definition\n");
+        ExitProcess(EXIT_FAILURE);
+    }
+    env = cpu->env_ptr;
+    cpu_reset(cpu);
+
+    env->cr[0] = CR0_PG_MASK | CR0_WP_MASK | CR0_PE_MASK;
+    env->hflags |= HF_PE_MASK | HF_CPL_MASK;
+    if (env->features[FEAT_1_EDX] & CPUID_SSE) {
+        env->cr[4] |= CR4_OSFXSR_MASK;
+        env->hflags |= HF_OSFXSR_MASK;
+    }
+    /* enable 64 bit mode if possible */
+    if (!(env->features[FEAT_8000_0001_EDX] & CPUID_EXT2_LM))
+    {
+        fprintf(stderr, "The selected x86 CPU does not support 64 bit mode\n");
+        ExitProcess(EXIT_FAILURE);
+    }
+    env->cr[4] |= CR4_PAE_MASK;
+    env->efer |= MSR_EFER_LMA | MSR_EFER_LME;
+    env->hflags |= HF_LMA_MASK;
+    /* flags setup : we activate the IRQs by default as in user mode */
+    env->eflags |= IF_MASK;
+
+    tcg_prologue_init(tcg_ctx);
+
+    /* FIXME: I should RESERVE stack_reserve bytes, and commit only stack_commit bytes and
+     * place a guard page at the end of the committed range. This will need exception handing
+     * (and better knowledge in my brain), so commit the entire stack for now.
+     *
+     * Afaics when the reserved area is exhausted an exception is triggered and Windows does
+     * not try to reserve more. Is this correct? */
+    stack = VirtualAlloc(NULL, image.stack_reserve, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!stack)
+    {
+        fprintf(stderr, "Could not reserve stack space.\n");
+        ExitProcess(EXIT_FAILURE);
+    }
+    /* Stack grows down, so point to the end of the allocation. */
+    env->regs[R_ESP] = h2g(stack) + image.stack_reserve;
+
+    env->idt.limit = 255;
+    idt_table = my_alloc(sizeof(uint64_t) * (env->idt.limit + 1));
+    env->idt.base = h2g(idt_table);
+    set_idt(0, 0);
+    set_idt(1, 0);
+    set_idt(2, 0);
+    set_idt(3, 3);
+    set_idt(4, 3);
+    set_idt(5, 0);
+    set_idt(6, 0);
+    set_idt(7, 0);
+    set_idt(8, 0);
+    set_idt(9, 0);
+    set_idt(10, 0);
+    set_idt(11, 0);
+    set_idt(12, 0);
+    set_idt(13, 0);
+    set_idt(14, 0);
+    set_idt(15, 0);
+    set_idt(16, 0);
+    set_idt(17, 0);
+    set_idt(18, 0);
+    set_idt(19, 0);
+    set_idt(0x80, 3);
+
+    /* linux segment setup */
+    {
+        uint64_t *gdt_table;
+        env->gdt.base = h2g(my_alloc(sizeof(uint64_t) * TARGET_GDT_ENTRIES));
+        env->gdt.limit = sizeof(uint64_t) * TARGET_GDT_ENTRIES - 1;
+        gdt_table = g2h(env->gdt.base);
+        /* 64 bit code segment */
+        write_dt(&gdt_table[__USER_CS >> 3], 0, 0xfffff,
+                 DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
+                 DESC_L_MASK |
+                 (3 << DESC_DPL_SHIFT) | (0xa << DESC_TYPE_SHIFT));
+        write_dt(&gdt_table[__USER_DS >> 3], 0, 0xfffff,
+                 DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
+                 (3 << DESC_DPL_SHIFT) | (0x2 << DESC_TYPE_SHIFT));
+    }
+    cpu_x86_load_seg(env, R_CS, __USER_CS);
+    cpu_x86_load_seg(env, R_SS, __USER_DS);
+    cpu_x86_load_seg(env, R_DS, 0);
+    cpu_x86_load_seg(env, R_ES, 0);
+    cpu_x86_load_seg(env, R_FS, 0);
+    cpu_x86_load_seg(env, R_GS, 0);
+
+    /* FIXME: Figure out how to free the CPU, stack, TEB and IDT on thread exit. */
+    thread_cpu = cpu;
+}
+
+static void cpu_loop(const void *code)
+{
+    CPUState *cs;
+    CPUX86State *env;
+    int trapnr;
+
+    cs = thread_cpu;
+    if (!cs)
+    {
+        fprintf(stderr, "Initializing new CPU for thread %x.\n", GetCurrentThreadId());
+        init_thread_cpu();
+        cs = thread_cpu;
+    }
+    env = cs->env_ptr;
+
+    /* FIXME: Back up caller saved registers and RIP. A local variable should suffice. */
+    env->eip = h2g(code);
+
+    for (;;)
+    {
+        cpu_exec_start(cs);
+        trapnr = cpu_exec(cs);
+        cpu_exec_end(cs);
+
+        switch (trapnr)
+        {
+            case EXCP_SYSCALL:
+                do_syscall(g2h(env->regs[R_EAX]));
+                continue;
+
+            default:
+                fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
+                cpu_dump_state(cs, stderr, fprintf, 0);
+                return;
+        }
+    }
+
+    /* FIXME: Restore registers. */
 }
 
 static void usage(int exitcode);
@@ -299,11 +418,7 @@ static int parse_args(int argc, char **argv)
 
 int main(int argc, char **argv, char **envp)
 {
-    CPUX86State *env;
-    CPUState *cpu;
     HMODULE exe_module;
-    struct qemu_pe_image image;
-    void *stack;
 
     parse_args(argc, argv);
 
@@ -326,102 +441,10 @@ int main(int argc, char **argv, char **envp)
     }
 
     tcg_exec_init(0);
-    cpu = cpu_create(X86_CPU_TYPE_NAME("qemu64"));
-    if (!cpu)
-    {
-        fprintf(stderr, "Unable to find CPU definition\n");
-        ExitProcess(EXIT_FAILURE);
-    }
-    env = cpu->env_ptr;
-    cpu_reset(cpu);
-
-    env->cr[0] = CR0_PG_MASK | CR0_WP_MASK | CR0_PE_MASK;
-    env->hflags |= HF_PE_MASK | HF_CPL_MASK;
-    if (env->features[FEAT_1_EDX] & CPUID_SSE) {
-        env->cr[4] |= CR4_OSFXSR_MASK;
-        env->hflags |= HF_OSFXSR_MASK;
-    }
-    /* enable 64 bit mode if possible */
-    if (!(env->features[FEAT_8000_0001_EDX] & CPUID_EXT2_LM))
-    {
-        fprintf(stderr, "The selected x86 CPU does not support 64 bit mode\n");
-        ExitProcess(EXIT_FAILURE);
-    }
-    env->cr[4] |= CR4_PAE_MASK;
-    env->efer |= MSR_EFER_LMA | MSR_EFER_LME;
-    env->hflags |= HF_LMA_MASK;
-    /* flags setup : we activate the IRQs by default as in user mode */
-    env->eflags |= IF_MASK;
-
-    tcg_prologue_init(tcg_ctx);
-
-    env->eip = h2g(image.entrypoint);
-
-    /* FIXME: I should RESERVE stack_reserve bytes, and commit only stack_commit bytes and
-     * place a guard page at the end of the committed range. This will need exception handing
-     * (and better knowledge in my brain), so commit the entire stack for now.
-     *
-     * Afaics when the reserved area is exhausted an exception is triggered and Windows does
-     * not try to reserve more. Is this correct? */
-    stack = VirtualAlloc(NULL, image.stack_reserve, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!stack)
-    {
-        fprintf(stderr, "Could not reserve stack space.\n");
-        ExitProcess(EXIT_FAILURE);
-    }
-    /* Stack grows down, so point to the end of the allocation. */
-    env->regs[R_ESP] = h2g(stack) + image.stack_reserve;
-
-    env->idt.limit = 255;
-    idt_table = my_alloc(sizeof(uint64_t) * (env->idt.limit + 1));
-    env->idt.base = h2g(idt_table);
-    set_idt(0, 0);
-    set_idt(1, 0);
-    set_idt(2, 0);
-    set_idt(3, 3);
-    set_idt(4, 3);
-    set_idt(5, 0);
-    set_idt(6, 0);
-    set_idt(7, 0);
-    set_idt(8, 0);
-    set_idt(9, 0);
-    set_idt(10, 0);
-    set_idt(11, 0);
-    set_idt(12, 0);
-    set_idt(13, 0);
-    set_idt(14, 0);
-    set_idt(15, 0);
-    set_idt(16, 0);
-    set_idt(17, 0);
-    set_idt(18, 0);
-    set_idt(19, 0);
-    set_idt(0x80, 3);
-
-    /* linux segment setup */
-    {
-        uint64_t *gdt_table;
-        env->gdt.base = h2g(my_alloc(sizeof(uint64_t) * TARGET_GDT_ENTRIES));
-        env->gdt.limit = sizeof(uint64_t) * TARGET_GDT_ENTRIES - 1;
-        gdt_table = g2h(env->gdt.base);
-        /* 64 bit code segment */
-        write_dt(&gdt_table[__USER_CS >> 3], 0, 0xfffff,
-                 DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
-                 DESC_L_MASK |
-                 (3 << DESC_DPL_SHIFT) | (0xa << DESC_TYPE_SHIFT));
-        write_dt(&gdt_table[__USER_DS >> 3], 0, 0xfffff,
-                 DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
-                 (3 << DESC_DPL_SHIFT) | (0x2 << DESC_TYPE_SHIFT));
-    }
-    cpu_x86_load_seg(env, R_CS, __USER_CS);
-    cpu_x86_load_seg(env, R_SS, __USER_DS);
-    cpu_x86_load_seg(env, R_DS, 0);
-    cpu_x86_load_seg(env, R_ES, 0);
-    cpu_x86_load_seg(env, R_FS, 0);
-    cpu_x86_load_seg(env, R_GS, 0);
 
     qemu_log("CPU Setup done\n");
 
-    cpu_loop(env);
+    cpu_loop(image.entrypoint);
 
     return 0;
 }

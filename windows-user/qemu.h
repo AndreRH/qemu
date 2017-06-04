@@ -144,6 +144,8 @@ typedef struct TaskState
 
 } __attribute__((aligned(16))) TaskState;
 
+extern __thread CPUState *thread_cpu;
+
 static inline void *my_alloc(size_t s)
 {
     return HeapAlloc(GetProcessHeap(), 0, s);
