@@ -223,7 +223,7 @@ static void cpu_loop(const void *code)
         switch (trapnr)
         {
             case EXCP_SYSCALL:
-                do_syscall(g2h(env->regs[R_EAX]));
+                do_syscall(g2h(env->regs[R_ECX]));
                 continue;
 
             case 0x6: /* sysret */
