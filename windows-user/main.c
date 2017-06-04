@@ -137,8 +137,6 @@ static void init_thread_cpu(void)
     /* flags setup : we activate the IRQs by default as in user mode */
     env->eflags |= IF_MASK;
 
-    tcg_prologue_init(tcg_ctx);
-
     /* FIXME: I should RESERVE stack_reserve bytes, and commit only stack_commit bytes and
      * place a guard page at the end of the committed range. This will need exception handing
      * (and better knowledge in my brain), so commit the entire stack for now.
@@ -212,15 +210,8 @@ static void cpu_loop(const void *code)
     int trapnr;
 
     cs = thread_cpu;
-    if (!cs)
-    {
-        fprintf(stderr, "Initializing new CPU for thread %x.\n", GetCurrentThreadId());
-        init_thread_cpu();
-        cs = thread_cpu;
-    }
     env = cs->env_ptr;
 
-    /* FIXME: Back up caller saved registers and RIP. A local variable should suffice. */
     env->eip = h2g(code);
 
     for (;;)
@@ -235,14 +226,65 @@ static void cpu_loop(const void *code)
                 do_syscall(g2h(env->regs[R_EAX]));
                 continue;
 
+            case 0x6: /* sysret */
+                return;
+
             default:
                 fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
                 cpu_dump_state(cs, stderr, fprintf, 0);
                 return;
         }
     }
+}
 
-    /* FIXME: Restore registers. */
+static const char sysretq[] = {0x48, 0x0f, 0x07};
+
+uint64_t qemu_execute(const void *code, uint64_t rcx)
+{
+    CPUState *cs;
+    CPUX86State *env;
+    uint64_t backup_eip, backup_ecx, backup_esp;
+
+    /* The basic idea of this function is to back up some registers, write the function argument
+     * into rcx, reserve stack space on the guest stack as the Win64 calling convention mandates
+     * and call the emulated CPU to execute the requested code.
+     *
+     * We need to make sure the emulated CPU interrupts execution after the called function
+     * returns and cpu_loop() returns as well. cpu_loop should not return if the function executes
+     * a syscall. To achieve that, we push a return address into the guest stack that points to
+     * an sysretq instruction. The sysretq will interrupt the CPU and cpu_loop recognizes the
+     * trap and returns gracefully.
+     *
+     * Afterwards restore registers and read the return value from EAX / RAX. */
+    cs = thread_cpu;
+    if (!cs)
+    {
+        qemu_log("Initializing new CPU for thread %x.\n", GetCurrentThreadId());
+        rcu_register_thread();
+        init_thread_cpu();
+        cs = thread_cpu;
+    }
+    env = cs->env_ptr;
+
+    backup_eip = env->eip;
+    backup_ecx = env->regs[R_ECX];
+    backup_esp = env->regs[R_ESP];
+    env->regs[R_ECX] = rcx;
+
+    /* FIXME: This is 64 bit specific. Implement the 32 bit WINAPI calling convention too. */
+    env->regs[R_ESP] -= 0x28; /* Reserve 32 bytes + 8 for the return address. */
+    /* Write the address of our iret call onto the stack. */
+    *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(sysretq);
+
+    qemu_log("Going to call guest code %p.\n", code);
+    cpu_loop(code);
+
+    env->regs[R_ECX] = backup_ecx;
+    env->regs[R_ESP] = backup_esp;
+    env->eip = backup_eip;
+
+    qemu_log("retval %lx.\n", env->regs[R_EAX]);
+    return env->regs[R_EAX];
 }
 
 static void usage(int exitcode);
@@ -420,6 +462,8 @@ int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module;
 
+    parallel_cpus = true;
+
     parse_args(argc, argv);
 
     module_call_init(MODULE_INIT_TRACE);
@@ -441,6 +485,8 @@ int main(int argc, char **argv, char **envp)
     }
 
     tcg_exec_init(0);
+    tcg_prologue_init(tcg_ctx);
+    init_thread_cpu();
 
     qemu_log("CPU Setup done\n");
 

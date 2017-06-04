@@ -38,6 +38,7 @@ static const struct qemu_ops ops =
     qemu_GetModuleHandleEx,
     qemu_GetProcAddress,
     qemu_FreeLibrary,
+    qemu_execute,
 };
 
 BOOL load_host_dlls(void)

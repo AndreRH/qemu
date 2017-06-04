@@ -33,6 +33,7 @@ struct qemu_ops
     HMODULE (*qemu_GetModuleHandleEx)(DWORD flags, const char *name);
     const void *(*qemu_GetProcAddress)(HMODULE module, const char *name);
     BOOL (*qemu_FreeLibrary)(HMODULE module);
+    uint64_t (*qemu_execute)(const void *code, uint64_t rcx);
 };
 
 typedef void (*syscall_handler)(struct qemu_syscall *call);
