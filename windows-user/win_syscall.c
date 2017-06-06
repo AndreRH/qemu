@@ -35,10 +35,11 @@ static unsigned int dll_count;
 
 static const struct qemu_ops ops =
 {
+    qemu_execute,
+    qemu_FreeLibrary,
     qemu_GetModuleHandleEx,
     qemu_GetProcAddress,
-    qemu_FreeLibrary,
-    qemu_execute,
+    qemu_LoadLibraryA,
 };
 
 BOOL load_host_dlls(void)
