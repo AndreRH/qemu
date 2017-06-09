@@ -487,6 +487,7 @@ static int parse_args(int argc, char **argv)
 int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module;
+    CPUX86State *env;
 
     parallel_cpus = true;
 
@@ -518,7 +519,13 @@ int main(int argc, char **argv, char **envp)
 
     qemu_log("CPU Setup done\n");
 
+    /* Apparently it is valid to return from the main function, so push our return code. */
+    env = thread_cpu->env_ptr;
+    env->regs[R_ESP] -= 0x8;
+    *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
+
     cpu_loop(image.entrypoint);
 
-    return 0;
+    qemu_log("Main function returned, result %lu.\n", env->regs[R_EAX]);
+    return env->regs[R_EAX];
 }
