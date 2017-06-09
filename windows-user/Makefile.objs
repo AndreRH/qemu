@@ -1,1 +1,1 @@
-obj-y = main.o mmap.o pe.o win_syscall.o
+obj-y = main.o mmap.o pe.o win_syscall.o signal.o
