@@ -19,6 +19,8 @@
 #include "qemu/osdep.h"
 #include "qemu-version.h"
 
+#include <winternl.h>
+
 #include "qapi/error.h"
 #include "qemu.h"
 #include "qemu/path.h"
@@ -104,11 +106,29 @@ static void set_idt(int n, unsigned int dpl)
     set_gate64(idt_table + n * 2, 0, dpl, 0, 0);
 }
 
+static TEB *alloc_teb(void)
+{
+    TEB *ret;
+
+    ret = VirtualAlloc(NULL, 0x2000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!ret)
+    {
+        fprintf(stderr, "Failed to allocate TEB\n");
+        ExitProcess(1);
+    }
+
+    ret->Tib.Self = &ret->Tib;
+    ret->Tib.ExceptionList = (void *)~0UL;
+
+    return ret;
+}
+
 static void init_thread_cpu(void)
 {
     CPUX86State *env;
     void *stack;
     CPUState *cpu;
+    TEB *teb = alloc_teb();
 
     cpu = cpu_create(X86_CPU_TYPE_NAME("qemu64"));
     if (!cpu)
@@ -198,6 +218,7 @@ static void init_thread_cpu(void)
     cpu_x86_load_seg(env, R_ES, 0);
     cpu_x86_load_seg(env, R_FS, 0);
     cpu_x86_load_seg(env, R_GS, 0);
+    env->segs[R_GS].base = h2g(teb);
 
     /* FIXME: Figure out how to free the CPU, stack, TEB and IDT on thread exit. */
     thread_cpu = cpu;
