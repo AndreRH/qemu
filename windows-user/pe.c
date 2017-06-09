@@ -150,7 +150,7 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
                 dll = my_alloc(strlen(copy) + 3);
                 strcpy(dll, copy);
                 strcat(dll, ".dll");
-                module = qemu_GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, dll);
+                module = qemu_LoadLibraryA(dll);
                 my_free(dll);
                 if (module)
                 {
