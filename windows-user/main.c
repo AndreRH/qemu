@@ -514,6 +514,8 @@ int main(int argc, char **argv, char **envp)
     tcg_prologue_init(tcg_ctx);
     init_thread_cpu();
 
+    signal_init();
+
     qemu_log("CPU Setup done\n");
 
     cpu_loop(image.entrypoint);

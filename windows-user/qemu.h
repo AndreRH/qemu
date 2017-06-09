@@ -156,4 +156,6 @@ static inline void my_free(void *p)
     HeapFree(GetProcessHeap(), 0, p);
 }
 
+void signal_init(void);
+
 #endif /* QEMU_H */
