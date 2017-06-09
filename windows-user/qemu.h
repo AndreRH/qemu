@@ -38,14 +38,14 @@ void mmap_fork_end(int child);
 
 static inline void *lock_user(int type, abi_ulong guest_addr, long len, int copy)
 {
-    qemu_log("lock_user\n");
+//     qemu_log("lock_user\n");
     return g2h(guest_addr);
 }
 
 static inline void unlock_user(void *host_ptr, abi_ulong guest_addr,
                                long len)
 {
-    qemu_log("unlock_user\n");
+//     qemu_log("unlock_user\n");
 }
 
 struct image_info
