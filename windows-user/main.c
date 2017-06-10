@@ -519,9 +519,10 @@ int main(int argc, char **argv, char **envp)
 
     qemu_log("CPU Setup done\n");
 
-    /* Apparently it is valid to return from the main function, so push our return code. */
+    /* Apparently it is valid to return from the main function, so push our return code.
+     * Reserve the usual 32 byte parameter shadow space too, as per win64 calling convention. */
     env = thread_cpu->env_ptr;
-    env->regs[R_ESP] -= 0x8;
+    env->regs[R_ESP] -= 0x28;
     *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
 
     cpu_loop(image.entrypoint);
