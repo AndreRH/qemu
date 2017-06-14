@@ -19,8 +19,6 @@
  */
 
 #include <stdio.h>
-#include <windows.h>
-#include <winternl.h>
 
 #include "qemu/osdep.h"
 #include "qemu-version.h"
@@ -59,6 +57,9 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const char *name)
         fprintf(stderr, "GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS not implemented\n");
     if (flags & GET_MODULE_HANDLE_EX_FLAG_PIN)
         fprintf(stderr, "GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS not implemented\n");
+
+    if (!name)
+        return guest_PEB.ImageBaseAddress;
 
     for (i = 0; i < ARRAY_SIZE(library_cache); ++i)
     {
