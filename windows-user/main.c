@@ -19,8 +19,6 @@
 #include "qemu/osdep.h"
 #include "qemu-version.h"
 
-#include <winternl.h>
-
 #include "qapi/error.h"
 #include "qemu.h"
 #include "qemu/path.h"
@@ -48,6 +46,8 @@ unsigned long guest_base;
 int have_guest_base;
 unsigned long reserved_va;
 static struct qemu_pe_image image;
+
+PEB guest_PEB;
 
 __thread CPUState *thread_cpu;
 
@@ -119,6 +119,7 @@ static TEB *alloc_teb(void)
 
     ret->Tib.Self = &ret->Tib;
     ret->Tib.ExceptionList = (void *)~0UL;
+    ret->Peb = &guest_PEB;
 
     return ret;
 }
@@ -504,6 +505,7 @@ int main(int argc, char **argv, char **envp)
         ExitProcess(EXIT_FAILURE);
     }
     qemu_get_image_info(exe_module, &image);
+    guest_PEB.ImageBaseAddress = exe_module;
 
     if (!load_host_dlls())
     {
