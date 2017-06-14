@@ -26,11 +26,11 @@ static inline void qemu_syscall(struct qemu_syscall *call)
      * FIXME 2: Apparently the optimizer doesn't know what I am
      * doing here and optimizes everything except the syscall and
      * retq away from most functions. */
-    asm("mov %%rcx, %0\n"
+    asm volatile("mov %0, %%rcx\n"
             "syscall\n"
             : /* no output - really? call is modified. */
             : "g"(call)
-            : "%rcx");
+            : "%rcx", "memory");
 }
 
 #define QEMU_SYSCALL_ID(a) ((QEMU_CURRENT_DLL << 32ULL) | (a))
