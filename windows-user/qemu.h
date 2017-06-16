@@ -159,7 +159,6 @@ static inline void my_free(void *p)
 
 void signal_init(void);
 
-/* Including winternl.h in this file causes loads of compiler warnings. */
 extern PEB guest_PEB;
 
 #endif /* QEMU_H */
