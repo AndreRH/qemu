@@ -31,6 +31,7 @@ struct qemu_ops
 {
     uint64_t (*qemu_execute)(const void *code, uint64_t rcx);
     BOOL (*qemu_FreeLibrary)(HMODULE module);
+    DWORD (*qemu_GetModuleFileName)(HMODULE module, WCHAR *filename, DWORD size);
     HMODULE (*qemu_GetModuleHandleEx)(DWORD flags, const char *name);
     const void *(*qemu_GetProcAddress)(HMODULE module, const char *name);
     void *(*qemu_getTEB)(void);
