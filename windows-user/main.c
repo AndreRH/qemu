@@ -51,6 +51,7 @@ PEB guest_PEB;
 static RTL_USER_PROCESS_PARAMETERS process_params;
 
 __thread CPUState *thread_cpu;
+__thread TEB *guest_teb;
 
 bool qemu_cpu_is_self(CPUState *cpu)
 {
@@ -125,12 +126,18 @@ static TEB *alloc_teb(void)
     return ret;
 }
 
+void *qemu_getTEB(void)
+{
+    return guest_teb;
+}
+
 static void init_thread_cpu(void)
 {
     CPUX86State *env;
     void *stack;
     CPUState *cpu;
-    TEB *teb = alloc_teb();
+
+    guest_teb = alloc_teb();
 
     cpu = cpu_create(X86_CPU_TYPE_NAME("qemu64"));
     if (!cpu)
@@ -220,7 +227,7 @@ static void init_thread_cpu(void)
     cpu_x86_load_seg(env, R_ES, 0);
     cpu_x86_load_seg(env, R_FS, 0);
     cpu_x86_load_seg(env, R_GS, 0);
-    env->segs[R_GS].base = h2g(teb);
+    env->segs[R_GS].base = h2g(guest_teb);
 
     /* FIXME: Figure out how to free the CPU, stack, TEB and IDT on thread exit. */
     thread_cpu = cpu;

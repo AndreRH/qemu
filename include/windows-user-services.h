@@ -33,6 +33,7 @@ struct qemu_ops
     BOOL (*qemu_FreeLibrary)(HMODULE module);
     HMODULE (*qemu_GetModuleHandleEx)(DWORD flags, const char *name);
     const void *(*qemu_GetProcAddress)(HMODULE module, const char *name);
+    void *(*qemu_getTEB)(void);
     HMODULE (*qemu_LoadLibrary)(const char *name);
 };
 

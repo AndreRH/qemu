@@ -39,6 +39,7 @@ static const struct qemu_ops ops =
     qemu_FreeLibrary,
     qemu_GetModuleHandleEx,
     qemu_GetProcAddress,
+    qemu_getTEB,
     qemu_LoadLibraryA,
 };
 

@@ -158,6 +158,7 @@ static inline void my_free(void *p)
 }
 
 void signal_init(void);
+void *qemu_getTEB(void);
 
 extern PEB guest_PEB;
 
