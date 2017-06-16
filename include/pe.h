@@ -2,6 +2,7 @@
 #define QEMU_PE_H
 
 HMODULE qemu_LoadLibraryA(const char *name);
+DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size);
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const char *name);
 const void *qemu_GetProcAddress(HMODULE module, const char *name);
 BOOL qemu_FreeLibrary(HMODULE module);

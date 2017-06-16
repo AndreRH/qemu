@@ -44,6 +44,7 @@ struct library_cache_entry
 {
     HMODULE mod;
     char name[MAX_PATH];
+    char fullpath[MAX_PATH];
     unsigned int ref;
 };
 
@@ -77,6 +78,34 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const char *name)
     qemu_log_mask(LOG_WIN32, "Module %s not yet loaded\n", name);
 
     return NULL;
+}
+
+DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size)
+{
+    unsigned int i;
+
+    if (!module)
+        module = qemu_GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL);
+
+    for (i = 0; library_cache[i].mod; ++i)
+    {
+        if (module != library_cache[i].mod)
+            continue;
+
+        if (strlen(library_cache[i].fullpath) < size)
+        {
+            return MultiByteToWideChar(CP_ACP, 0, library_cache[i].fullpath, -1, filename, size);
+        }
+        else
+        {
+            MultiByteToWideChar(CP_ACP, 0, library_cache[i].fullpath, size, filename, size);
+            filename[size - 1] = 0;
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
+            return size;
+        }
+    }
+
+    return 0;
 }
 
 HMODULE qemu_LoadLibraryA(const char *name)
@@ -219,7 +248,7 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
             return FALSE;
         }
     }
-    
+
     return TRUE;
 }
 
@@ -237,6 +266,8 @@ static HMODULE load_libray(const char *name)
     void *base = NULL, *alloc;
     const IMAGE_SECTION_HEADER *section;
     const IMAGE_IMPORT_DESCRIPTOR *imports = NULL;
+    char new_name[MAX_PATH + 10];
+    const char *load_name = name;
 
     if (strlen(name) > (ARRAY_SIZE(library_cache[0].name) - 1))
     {
@@ -247,8 +278,6 @@ static HMODULE load_libray(const char *name)
     file = CreateFileA(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (file == INVALID_HANDLE_VALUE)
     {
-        char new_name[MAX_PATH + 10];
-
         /* FIXME: Implement a proper search path system. */
         sprintf(new_name, "qemu_guest_dll\\%s", name);
         file = CreateFileA(new_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
@@ -257,6 +286,7 @@ static HMODULE load_libray(const char *name)
             qemu_log_mask(LOG_WIN32, "CreateFileA failed.\n");
             goto error;
         }
+        load_name = new_name;
     }
 
     ret = ReadFile(file, &dos, sizeof(dos), &read, NULL);
@@ -436,7 +466,7 @@ static HMODULE load_libray(const char *name)
 
     if (!fixup_imports(base, imports))
         goto error;
-    
+
     for (i = 0; i < ARRAY_SIZE(library_cache); ++i)
     {
         if (!library_cache[i].mod)
@@ -444,6 +474,7 @@ static HMODULE load_libray(const char *name)
             library_cache[i].mod = base;
             library_cache[i].ref = 1;
             strcpy(library_cache[i].name, name);
+            GetFullPathName(load_name, ARRAY_SIZE(library_cache[i].fullpath), library_cache[i].fullpath, NULL);
             break;
         }
     }
