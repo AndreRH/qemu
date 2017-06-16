@@ -48,6 +48,7 @@ unsigned long reserved_va;
 static struct qemu_pe_image image;
 
 PEB guest_PEB;
+static RTL_USER_PROCESS_PARAMETERS process_params;
 
 __thread CPUState *thread_cpu;
 
@@ -489,10 +490,12 @@ int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module;
     CPUX86State *env;
+    int optind, i, len;
+    char *cmdline;
 
     parallel_cpus = true;
 
-    parse_args(argc, argv);
+    optind = parse_args(argc, argv);
 
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
@@ -506,6 +509,35 @@ int main(int argc, char **argv, char **envp)
     }
     qemu_get_image_info(exe_module, &image);
     guest_PEB.ImageBaseAddress = exe_module;
+
+    len = strlen(filename);
+    for (i = optind + 1; i < argc; ++i)
+        len += strlen(argv[i]) + 3; /* Space in front, plus quotes if necessary */
+    len++; /* Terminating zero. */
+    cmdline = my_alloc(len);
+
+    strcpy(cmdline, filename);
+    for (i = optind + 1; i < argc; ++i)
+    {
+        if (strpbrk(argv[i], " \t\n"))
+        {
+            /* Re-add quotes. */
+            strcat(cmdline, " \"");
+            /* FIXME: If there are any quotes in this, I'll probably have to escape them. */
+            strcat(cmdline, argv[i]);
+            strcat(cmdline, "\"");
+        }
+        else
+        {
+            strcat(cmdline, " ");
+            strcat(cmdline, argv[i]);
+        }
+    }
+
+    /* FIXME: Wine allocates the string buffer right behind the process parameter structure. */
+    guest_PEB.ProcessParameters = &process_params;
+    RtlCreateUnicodeStringFromAsciiz(&guest_PEB.ProcessParameters->CommandLine, cmdline);
+    my_free(cmdline);
 
     if (!load_host_dlls())
     {
