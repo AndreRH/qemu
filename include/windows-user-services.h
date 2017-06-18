@@ -32,10 +32,10 @@ struct qemu_ops
     uint64_t (*qemu_execute)(const void *code, uint64_t rcx);
     BOOL (*qemu_FreeLibrary)(HMODULE module);
     DWORD (*qemu_GetModuleFileName)(HMODULE module, WCHAR *filename, DWORD size);
-    HMODULE (*qemu_GetModuleHandleEx)(DWORD flags, const char *name);
+    HMODULE (*qemu_GetModuleHandleEx)(DWORD flags, const WCHAR *name);
     const void *(*qemu_GetProcAddress)(HMODULE module, const char *name);
     void *(*qemu_getTEB)(void);
-    HMODULE (*qemu_LoadLibrary)(const char *name);
+    HMODULE (*qemu_LoadLibrary)(const WCHAR *name);
 };
 
 typedef void (*syscall_handler)(struct qemu_syscall *call);
