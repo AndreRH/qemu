@@ -144,12 +144,12 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
         return NULL;
     }
 
-    names = (DWORD *)((char *)module + exports->AddressOfNames);
-    functions = (DWORD *)((char *)module + exports->AddressOfFunctions);
+    names = get_rva(module, exports->AddressOfNames);
+    functions = get_rva(module, exports->AddressOfFunctions);
     for (i = 0; i < exports->NumberOfFunctions; ++i)
     {
-        const char *exportname = (const char *)module + names[i];
-        const void *funcptr = (const char *)module + functions[i];
+        const char *exportname = get_rva(module, names[i]);
+        const void *funcptr = get_rva(module, functions[i]);
         if (!strcmp(exportname, name))
         {
             if ((const char *)funcptr >= (const char *)exports &&
@@ -200,7 +200,7 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
     for (i = 0; imports && imports[i].Name; ++i)
     {
         HMODULE lib;
-        const char *lib_name = (char *)module + imports[i].Name;
+        const char *lib_name = get_rva(module, imports[i].Name);
         WCHAR *lib_nameW;
 
         qemu_log_mask(LOG_WIN32, "Module imports library %s\n", lib_name);
@@ -217,12 +217,11 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
         if (nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
         {
             IMAGE_THUNK_DATA64 *thunk;
-            thunk = (IMAGE_THUNK_DATA64 *)((char *)module + imports[i].FirstThunk);
+            thunk = get_rva(module, imports[i].FirstThunk);
 
             while(thunk->u1.Function)
             {
-                IMAGE_IMPORT_BY_NAME *function_name =
-                        (IMAGE_IMPORT_BY_NAME *)((char *)module + thunk->u1.Function);
+                IMAGE_IMPORT_BY_NAME *function_name = get_rva(module, thunk->u1.Function);
                 const void *impl = qemu_GetProcAddress(lib, (const char *)function_name->Name);
                 if (!impl)
                 {
@@ -512,7 +511,7 @@ static HMODULE load_libray(const WCHAR *name)
 
     for (i = 0; i < nt.FileHeader.NumberOfSections; i++)
     {
-        void *location = ((char *)base + section[i].VirtualAddress);
+        void *location = get_rva(base, section[i].VirtualAddress);
         SIZE_T map_size = section[i].Misc.VirtualSize;
         qemu_log_mask(LOG_WIN32, "Mapping section %8s at %p.\n", section[i].Name, location);
         DWORD protect, old_protect;
