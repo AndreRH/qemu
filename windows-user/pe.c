@@ -19,6 +19,7 @@
  */
 
 #include <stdio.h>
+#include <wine/debug.h>
 
 #include "qemu/osdep.h"
 #include "qemu-version.h"
@@ -27,7 +28,7 @@
 #include "qemu.h"
 #include "pe.h"
 
-static HMODULE load_libray(const char *name);
+static HMODULE load_libray(const WCHAR *name);
 
 struct nt_header
 {
@@ -43,14 +44,14 @@ struct nt_header
 struct library_cache_entry
 {
     HMODULE mod;
-    char name[MAX_PATH];
-    char fullpath[MAX_PATH];
+    WCHAR name[MAX_PATH];
+    WCHAR fullpath[MAX_PATH];
     unsigned int ref;
 };
 
 static struct library_cache_entry library_cache[128];
 
-HMODULE qemu_GetModuleHandleEx(DWORD flags, const char *name)
+HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
 {
     unsigned int i;
 
@@ -66,16 +67,16 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const char *name)
     {
         if (!library_cache[i].mod)
             continue;
-        if (!strcasecmp(name, library_cache[i].name))
+        if (!lstrcmpiW(name, library_cache[i].name))
         {
-            qemu_log_mask(LOG_WIN32, "Already loaded library %s\n", name);
+            qemu_log_mask(LOG_WIN32, "Already loaded library %s\n", wine_dbgstr_w(name));
             if (!(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
                 library_cache[i].ref++;
             return library_cache[i].mod;
         }
     }
 
-    qemu_log_mask(LOG_WIN32, "Module %s not yet loaded\n", name);
+    qemu_log_mask(LOG_WIN32, "Module %s not yet loaded\n", wine_dbgstr_w(name));
 
     return NULL;
 }
@@ -92,13 +93,15 @@ DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size)
         if (module != library_cache[i].mod)
             continue;
 
-        if (strlen(library_cache[i].fullpath) < size)
+        i = lstrlenW(library_cache[i].fullpath) + 1;
+        if (i < size)
         {
-            return MultiByteToWideChar(CP_ACP, 0, library_cache[i].fullpath, -1, filename, size);
+            memcpy(filename, library_cache[i].fullpath, i * sizeof(*filename));
+            return i;
         }
         else
         {
-            MultiByteToWideChar(CP_ACP, 0, library_cache[i].fullpath, size, filename, size);
+            memcpy(filename, library_cache[i].fullpath, size * sizeof(*filename));
             filename[size - 1] = 0;
             SetLastError(ERROR_INSUFFICIENT_BUFFER);
             return size;
@@ -108,7 +111,7 @@ DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size)
     return 0;
 }
 
-HMODULE qemu_LoadLibraryA(const char *name)
+HMODULE qemu_LoadLibrary(const WCHAR *name)
 {
     HMODULE ret;
 
@@ -168,8 +171,9 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
             if ((const char *)funcptr >= (const char *)exports &&
                     (const char *)funcptr < (const char *)exports + export_size)
             {
-                char *copy = strdup((const char *)funcptr);
-                char *func, *dll;
+                static const WCHAR dot_dll[] = {'.', 'd', 'l', 'l', 0};
+                char *func, *copy = strdup((const char *)funcptr);
+                WCHAR *dll;
 
                 qemu_log_mask(LOG_WIN32, "Export %s is a forward to %s!\n", name, copy);
                 func = strrchr(copy, '.');
@@ -177,10 +181,10 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
                 func++;
                 qemu_log_mask(LOG_WIN32, "Dll %s export %s\n", copy, func);
 
-                dll = my_alloc(strlen(copy) + 3);
-                strcpy(dll, copy);
-                strcat(dll, ".dll");
-                module = qemu_LoadLibraryA(dll);
+                dll = my_alloc(sizeof(dll) * (strlen(copy) + 4));
+                MultiByteToWideChar(CP_ACP, 0, copy, -1, dll, strlen(copy) + 4);
+                lstrcatW(dll, dot_dll);
+                module = qemu_LoadLibrary(dll);
                 my_free(dll);
                 if (module)
                 {
@@ -213,8 +217,13 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
     {
         HMODULE lib;
         const char *lib_name = (char *)module + imports[i].Name;
+        WCHAR *lib_nameW;
+
         qemu_log_mask(LOG_WIN32, "Module imports library %s\n", lib_name);
-        lib = qemu_LoadLibraryA(lib_name);
+        lib_nameW = my_alloc(sizeof(*lib_nameW) * (strlen(lib_name) + 1));
+        MultiByteToWideChar(CP_ACP, 0, lib_name, -1, lib_nameW, strlen(lib_name) + 1);
+        lib = qemu_LoadLibrary(lib_nameW);
+        my_free(lib_nameW);
         if (!lib)
         {
             fprintf(stderr, "Required library %s not found\n", lib_name);
@@ -252,7 +261,7 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
     return TRUE;
 }
 
-static HMODULE load_libray(const char *name)
+static HMODULE load_libray(const WCHAR *name)
 {
     HANDLE file;
     IMAGE_DOS_HEADER dos;
@@ -266,24 +275,27 @@ static HMODULE load_libray(const char *name)
     void *base = NULL, *alloc;
     const IMAGE_SECTION_HEADER *section;
     const IMAGE_IMPORT_DESCRIPTOR *imports = NULL;
-    char new_name[MAX_PATH + 10];
-    const char *load_name = name;
+    WCHAR new_name[MAX_PATH + 10];
+    const WCHAR *load_name = name;
 
-    if (strlen(name) > (ARRAY_SIZE(library_cache[0].name) - 1))
+    if (lstrlenW(name) > (ARRAY_SIZE(library_cache[0].name) - 1))
     {
         fprintf(stderr, "Implement proper library name strings.\n");
         return NULL;
     }
 
-    file = CreateFileA(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    file = CreateFileW(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (file == INVALID_HANDLE_VALUE)
     {
+        static const WCHAR qemu_guest_dll[] = {'q', 'e', 'm', 'u', '_', 'g', 'u', 'e', 's', 't', '_', 'd', 'l', 'l', '\\', 0};
+
         /* FIXME: Implement a proper search path system. */
-        sprintf(new_name, "qemu_guest_dll\\%s", name);
-        file = CreateFileA(new_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        lstrcpyW(new_name, qemu_guest_dll);
+        lstrcatW(new_name, name);
+        file = CreateFileW(new_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
         if (file == INVALID_HANDLE_VALUE)
         {
-            qemu_log_mask(LOG_WIN32, "CreateFileA failed.\n");
+            qemu_log_mask(LOG_WIN32, "CreateFileW failed.\n");
             goto error;
         }
         load_name = new_name;
@@ -473,8 +485,8 @@ static HMODULE load_libray(const char *name)
         {
             library_cache[i].mod = base;
             library_cache[i].ref = 1;
-            strcpy(library_cache[i].name, name);
-            GetFullPathName(load_name, ARRAY_SIZE(library_cache[i].fullpath), library_cache[i].fullpath, NULL);
+            lstrcpyW(library_cache[i].name, name);
+            GetFullPathNameW(load_name, ARRAY_SIZE(library_cache[i].fullpath), library_cache[i].fullpath, NULL);
             break;
         }
     }
