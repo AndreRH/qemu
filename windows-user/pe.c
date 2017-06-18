@@ -49,7 +49,8 @@ struct library_cache_entry
     unsigned int ref;
 };
 
-static struct library_cache_entry library_cache[128];
+static struct library_cache_entry *library_cache;
+static unsigned int library_cache_size, loaded_libraries;
 
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
 {
@@ -63,7 +64,7 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
     if (!name)
         return guest_PEB.ImageBaseAddress;
 
-    for (i = 0; i < ARRAY_SIZE(library_cache); ++i)
+    for (i = 0; i < library_cache_size; ++i)
     {
         if (!library_cache[i].mod)
             continue;
@@ -88,7 +89,7 @@ DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size)
     if (!module)
         module = qemu_GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL);
 
-    for (i = 0; library_cache[i].mod; ++i)
+    for (i = 0; i < library_cache_size; ++i)
     {
         if (module != library_cache[i].mod)
             continue;
@@ -253,6 +254,7 @@ static HMODULE load_libray(const WCHAR *name)
     const IMAGE_IMPORT_DESCRIPTOR *imports = NULL;
     WCHAR new_name[MAX_PATH + 10];
     const WCHAR *load_name = name;
+    struct library_cache_entry *new_cache;
 
     if (lstrlenW(name) > (ARRAY_SIZE(library_cache[0].name) - 1))
     {
@@ -455,7 +457,33 @@ static HMODULE load_libray(const WCHAR *name)
     if (!fixup_imports(base, imports))
         goto error;
 
-    for (i = 0; i < ARRAY_SIZE(library_cache); ++i)
+    if (loaded_libraries >= library_cache_size)
+    {
+        if (!library_cache)
+        {
+            new_cache = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*new_cache));
+            if (!new_cache)
+            {
+                fprintf(stderr, "Out of memory\n");
+                goto error;
+            }
+            library_cache_size = 1;
+        }
+        else
+        {
+            new_cache = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                    library_cache, sizeof(*new_cache) * library_cache_size * 2);
+            if (!new_cache)
+            {
+                fprintf(stderr, "Out of memory\n");
+                goto error;
+            }
+            library_cache_size *= 2;
+        }
+        library_cache = new_cache;
+    }
+
+    for (i = 0; i < library_cache_size; ++i)
     {
         if (!library_cache[i].mod)
         {
@@ -463,14 +491,11 @@ static HMODULE load_libray(const WCHAR *name)
             library_cache[i].ref = 1;
             lstrcpyW(library_cache[i].name, name);
             GetFullPathNameW(load_name, ARRAY_SIZE(library_cache[i].fullpath), library_cache[i].fullpath, NULL);
-            break;
+            loaded_libraries++;
+            return base;
         }
     }
-
-    if (i == ARRAY_SIZE(library_cache))
-        fprintf(stderr, "Lib cache too small\n");
-
-    return base;
+    fprintf(stderr, "Library cache error.\n");
 
 error:
     if (base)
