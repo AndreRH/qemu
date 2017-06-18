@@ -124,36 +124,12 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
 
 const void *qemu_GetProcAddress(HMODULE module, const char *name)
 {
-    const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)module;
-    const struct nt_header *nt = (const struct nt_header *)((const char *)dos + dos->e_lfanew);
-    SIZE_T fixed_header_size = 0, export_size;
+    ULONG export_size;
     unsigned int i;
     const IMAGE_EXPORT_DIRECTORY *exports = NULL;
-    const IMAGE_SECTION_HEADER *section;
     const DWORD *names, *functions;
 
-    fixed_header_size = dos->e_lfanew + sizeof(nt->Signature) + sizeof(nt->FileHeader);
-    if (nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
-    {
-        fixed_header_size += sizeof(nt->opt.hdr64);
-    }
-    else
-    {
-        fixed_header_size += sizeof(nt->opt.hdr32);
-    }
-
-    section = (const IMAGE_SECTION_HEADER *)((char *)module + fixed_header_size);
-
-    for (i = 0; i < nt->FileHeader.NumberOfSections; ++i)
-    {
-        if (!memcmp(section[i].Name, ".edata", strlen(".edata")))
-        {
-            exports = (const IMAGE_EXPORT_DIRECTORY *)((char *)module + section[i].VirtualAddress);
-            export_size = section[i].Misc.VirtualSize;
-            break;
-        }
-    }
-
+    exports = RtlImageDirectoryEntryToData(module, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &export_size);
     if (!exports)
     {
         fprintf(stderr, "Module has no exports\n");
@@ -509,7 +485,7 @@ void qemu_get_image_info(const HMODULE module, struct qemu_pe_image *info)
 {
     const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)module;
     const struct nt_header *nt = (const struct nt_header *)((const char *)dos + dos->e_lfanew);
-    
+
     info->entrypoint = (void *)((char *)module) + nt->opt.hdr64.AddressOfEntryPoint;
     info->stack_reserve = nt->opt.hdr64.SizeOfStackReserve;
     info->stack_commit = nt->opt.hdr64.SizeOfStackCommit;
