@@ -19,6 +19,8 @@
  */
 
 #include <stdio.h>
+#include <ntstatus.h>
+#define WIN32_NO_STATUS
 #include <wine/debug.h>
 
 #include "qemu/osdep.h"
@@ -51,6 +53,11 @@ struct library_cache_entry
 
 static struct library_cache_entry *library_cache;
 static unsigned int library_cache_size, loaded_libraries;
+
+static inline void *get_rva(HMODULE module, DWORD va)
+{
+    return (void *)((char *)module + va);
+}
 
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
 {
@@ -238,6 +245,127 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
     return TRUE;
 }
 
+/* Code copied from Wine. This function is exported from ntdll, but the ARM version
+ * of ntdll can't deal with IMAGE_REL_BASED_DIR64, so we need our own implementation. */
+static IMAGE_BASE_RELOCATION * qemu_LdrProcessRelocationBlock(void *page, UINT count,
+        USHORT *relocs, INT_PTR delta)
+{
+    while (count--)
+    {
+        USHORT offset = *relocs & 0xfff;
+        int type = *relocs >> 12;
+        switch(type)
+        {
+        case IMAGE_REL_BASED_ABSOLUTE:
+            break;
+        case IMAGE_REL_BASED_HIGH:
+            *(short *)((char *)page + offset) += HIWORD(delta);
+            break;
+        case IMAGE_REL_BASED_LOW:
+            *(short *)((char *)page + offset) += LOWORD(delta);
+            break;
+        case IMAGE_REL_BASED_HIGHLOW:
+            *(int *)((char *)page + offset) += delta;
+            break;
+        case IMAGE_REL_BASED_DIR64:
+            *(INT_PTR *)((char *)page + offset) += delta;
+            break;
+        default:
+            fprintf(stderr, "Unknown/unsupported fixup type %x.\n", type);
+            return NULL;
+        }
+        relocs++;
+    }
+    return (IMAGE_BASE_RELOCATION *)relocs;  /* return address of next block */
+}
+
+/* Code copied from Wine. */
+static BOOL relocate_image(HMODULE module, SIZE_T len)
+{
+    IMAGE_NT_HEADERS *nt;
+    char *base;
+    IMAGE_BASE_RELOCATION *rel, *end;
+    const IMAGE_DATA_DIRECTORY *relocs;
+    const IMAGE_SECTION_HEADER *sec;
+    INT_PTR delta;
+    ULONG protect_old[96], i;
+    SYSTEM_INFO sysinfo;
+
+    nt = RtlImageNtHeader(module);
+    base = (char *)nt->OptionalHeader.ImageBase;
+
+    GetSystemInfo(&sysinfo);
+    /* no relocations are performed on non page-aligned binaries */
+    if (nt->OptionalHeader.SectionAlignment < sysinfo.dwPageSize)
+        return STATUS_SUCCESS;
+
+    /* Copied from Wine, not sure what this is supposed to do. I guess it triggers in case someone
+     * uses LoadLibrary to load a .exe file. */
+    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_DLL) && guest_PEB.ImageBaseAddress)
+    {
+        fprintf(stderr, "Not relocating because I am loading a second .exe???\n");
+        return STATUS_SUCCESS;
+    }
+
+    relocs = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+
+    if (nt->FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED)
+    {
+        fprintf(stderr, "Need to relocate module from %p to %p, but there are no relocation records\n",
+              base, module);
+        return STATUS_CONFLICTING_ADDRESSES;
+    }
+
+    if (!relocs->Size)
+    {
+        qemu_log_mask(LOG_WIN32, "Reloc has zero size\n");
+        return STATUS_SUCCESS;
+    }
+    if (!relocs->VirtualAddress) return STATUS_CONFLICTING_ADDRESSES;
+
+    if (nt->FileHeader.NumberOfSections > sizeof(protect_old)/sizeof(protect_old[0]))
+        return STATUS_INVALID_IMAGE_FORMAT;
+
+    sec = (const IMAGE_SECTION_HEADER *)((const char *)&nt->OptionalHeader +
+                                         nt->FileHeader.SizeOfOptionalHeader);
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        void *addr = get_rva(module, sec[i].VirtualAddress);
+        SIZE_T size = sec[i].SizeOfRawData;
+        VirtualProtect(addr, size, PAGE_READWRITE, &protect_old[i]);
+    }
+
+    qemu_log_mask(LOG_WIN32, "relocating from %p-%p to %p-%p\n",
+           base, base + len, module, (char *)module + len );
+
+    rel = get_rva(module, relocs->VirtualAddress);
+    end = get_rva(module, relocs->VirtualAddress + relocs->Size);
+    delta = (char *)module - base;
+
+    while (rel < end - 1 && rel->SizeOfBlock)
+    {
+        if (rel->VirtualAddress >= len)
+        {
+            qemu_log_mask(LOG_WIN32, "invalid address %p in relocation %p\n",
+                    get_rva(module, rel->VirtualAddress), rel);
+            return STATUS_ACCESS_VIOLATION;
+        }
+        rel = qemu_LdrProcessRelocationBlock(get_rva(module, rel->VirtualAddress),
+                (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT),
+                (USHORT *)(rel + 1), delta);
+        if (!rel) return STATUS_INVALID_IMAGE_FORMAT;
+    }
+
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        void *addr = get_rva(module, sec[i].VirtualAddress);
+        SIZE_T size = sec[i].SizeOfRawData;
+        VirtualProtect(addr, size, protect_old[i], &protect_old[i]);
+    }
+
+    return STATUS_SUCCESS;
+}
+
 static HMODULE load_libray(const WCHAR *name)
 {
     HANDLE file;
@@ -356,8 +484,12 @@ static HMODULE load_libray(const WCHAR *name)
     qemu_log_mask(LOG_WIN32, "Got %p\n", base);
     if (!base)
     {
-        fprintf(stderr, "FIXME: Implement relocations!\n");
-        goto error;
+        base = VirtualAlloc(NULL, image_size, MEM_RESERVE, PAGE_READONLY);
+        if (!base)
+        {
+            fprintf(stderr, "Failed to reserve address space for image!\n");
+            goto error;
+        }
     }
 
     alloc = VirtualAlloc(base, header_size, MEM_COMMIT, PAGE_READWRITE);
@@ -452,6 +584,12 @@ static HMODULE load_libray(const WCHAR *name)
 
         if (!memcmp(section[i].Name, ".idata", 6))
             imports = alloc;
+    }
+
+    if (base != image_base && relocate_image(base, image_size) != STATUS_SUCCESS)
+    {
+        fprintf(stderr, "Relocate failed\n");
+        goto error;
     }
 
     if (!fixup_imports(base, imports))
