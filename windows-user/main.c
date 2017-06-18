@@ -499,6 +499,7 @@ int main(int argc, char **argv, char **envp)
     CPUX86State *env;
     int optind, i, len;
     char *cmdline;
+    WCHAR *filenameW;
 
     parallel_cpus = true;
 
@@ -508,7 +509,11 @@ int main(int argc, char **argv, char **envp)
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
 
-    exe_module = qemu_LoadLibraryA(filename);
+    i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
+    filenameW = my_alloc(i * sizeof(*filenameW));
+    MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, i);
+    exe_module = qemu_LoadLibrary(filenameW);
+    my_free(filenameW);
     if (!exe_module)
     {
         fprintf(stderr, "Failed to load \"%s\", last error %u.\n", filename, GetLastError());

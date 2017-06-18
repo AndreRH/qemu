@@ -41,7 +41,7 @@ static const struct qemu_ops ops =
     qemu_GetModuleHandleEx,
     qemu_GetProcAddress,
     qemu_getTEB,
-    qemu_LoadLibraryA,
+    qemu_LoadLibrary,
 };
 
 BOOL load_host_dlls(void)
@@ -53,7 +53,7 @@ BOOL load_host_dlls(void)
     HANDLE find_handle;
     struct load_host_dlls *new_ptr;
     char path[MAX_PATH];
-    
+
     dll_count = 2;
     dlls = my_alloc(sizeof(*dlls) * dll_count);
     if (!dlls)
@@ -81,7 +81,7 @@ BOOL load_host_dlls(void)
             fprintf(stderr, "Unable to load library %s.\n", path);
             continue;
         }
-        
+
         fn = (syscall_lib_register)GetProcAddress(mod, "qemu_dll_register");
         if (!fn)
         {
@@ -89,7 +89,7 @@ BOOL load_host_dlls(void)
             FreeLibrary(mod);
             continue;
         }
-        
+
         handlers = fn(&ops, &dll_num);
 
         if (dll_count <= dll_num)
