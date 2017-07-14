@@ -217,7 +217,15 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
         if (nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64)
         {
             IMAGE_THUNK_DATA64 *thunk;
+            SIZE_T protect_size = 0;
+            DWORD old_protect;
+            void *protect_base;
+
             thunk = get_rva(module, imports[i].FirstThunk);
+            protect_base = thunk;
+            while (thunk[protect_size].u1.Ordinal) protect_size++;
+            protect_size *= sizeof(*thunk);
+            VirtualProtect(protect_base, protect_size, PAGE_READWRITE, &old_protect);
 
             while(thunk->u1.Function)
             {
@@ -233,6 +241,8 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
                 *(const void **)thunk = impl;
                 thunk++;
             }
+
+            VirtualProtect(protect_base, protect_size, old_protect, &old_protect);
         }
         else
         {
