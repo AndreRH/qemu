@@ -378,7 +378,7 @@ static HMODULE load_libray(const WCHAR *name)
     unsigned int i;
     void *base = NULL, *alloc;
     const IMAGE_SECTION_HEADER *section;
-    const IMAGE_IMPORT_DESCRIPTOR *imports = NULL;
+    const IMAGE_IMPORT_DESCRIPTOR *imports = NULL, *imports2;
     WCHAR new_name[MAX_PATH + 10];
     const WCHAR *load_name = name;
     struct library_cache_entry *new_cache;
@@ -590,6 +590,13 @@ static HMODULE load_libray(const WCHAR *name)
         fprintf(stderr, "Relocate failed\n");
         goto error;
     }
+
+    imports2 = RtlImageDirectoryEntryToData(base, TRUE,
+            IMAGE_DIRECTORY_ENTRY_IMPORT, &read);
+    if (imports2)
+        imports = imports2;
+    else
+        fprintf(stderr, "Did not find IMAGE_DIRECTORY_ENTRY_IMPORT, idata at %p.\n", imports);
 
     if (!fixup_imports(base, imports))
         goto error;
