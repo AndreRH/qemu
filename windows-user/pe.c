@@ -130,12 +130,51 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
     return ret;
 }
 
+static const void *find_forwarded_export(HMODULE module, const void *funcptr, const char *name, int ord)
+{
+    static const WCHAR dot_dll[] = {'.', 'd', 'l', 'l', 0};
+    char *func, *copy = strdup((const char *)funcptr);
+    WCHAR *dll;
+
+    if (name)
+        qemu_log_mask(LOG_WIN32, "Export %s is a forward to %s!\n", name, copy);
+    else
+        qemu_log_mask(LOG_WIN32, "Export %d is a forward to %s!\n", ord, copy);
+
+    func = strrchr(copy, '.');
+    *func = 0;
+    func++;
+    qemu_log_mask(LOG_WIN32, "Dll %s export %s\n", copy, func);
+
+    dll = my_alloc(sizeof(dll) * (strlen(copy) + 4));
+    MultiByteToWideChar(CP_ACP, 0, copy, -1, dll, strlen(copy) + 4);
+    lstrcatW(dll, dot_dll);
+    module = qemu_LoadLibrary(dll);
+    my_free(dll);
+    if (module)
+    {
+        funcptr = qemu_GetProcAddress(module, func);
+        qemu_log_mask(LOG_WIN32, "Found export %s in DLL %s.dll(%p)\n", func, copy, module);
+    }
+    else
+    {
+        fprintf(stderr, "Module %s.dll for forwarded export %s.%s not found.\n", copy,
+                copy, func);
+        funcptr = NULL;
+    }
+
+    free(copy);
+
+    return funcptr;
+}
+
 const void *qemu_GetProcAddress(HMODULE module, const char *name)
 {
     ULONG export_size;
     unsigned int i;
     const IMAGE_EXPORT_DIRECTORY *exports = NULL;
     const DWORD *names, *functions;
+    const void *funcptr;
 
     exports = RtlImageDirectoryEntryToData(module, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &export_size);
     if (!exports)
@@ -146,48 +185,48 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
 
     names = get_rva(module, exports->AddressOfNames);
     functions = get_rva(module, exports->AddressOfFunctions);
-    for (i = 0; i < exports->NumberOfFunctions; ++i)
+
+    if ((ULONG_PTR)name >> 16)
     {
-        const char *exportname = get_rva(module, names[i]);
-        const void *funcptr = get_rva(module, functions[i]);
-        if (!strcmp(exportname, name))
+        for (i = 0; i < exports->NumberOfFunctions; ++i)
         {
-            if ((const char *)funcptr >= (const char *)exports &&
-                    (const char *)funcptr < (const char *)exports + export_size)
+            const char *exportname = get_rva(module, names[i]);
+            funcptr = get_rva(module, functions[i]);
+            if (!strcmp(exportname, name))
             {
-                static const WCHAR dot_dll[] = {'.', 'd', 'l', 'l', 0};
-                char *func, *copy = strdup((const char *)funcptr);
-                WCHAR *dll;
-
-                qemu_log_mask(LOG_WIN32, "Export %s is a forward to %s!\n", name, copy);
-                func = strrchr(copy, '.');
-                *func = 0;
-                func++;
-                qemu_log_mask(LOG_WIN32, "Dll %s export %s\n", copy, func);
-
-                dll = my_alloc(sizeof(dll) * (strlen(copy) + 4));
-                MultiByteToWideChar(CP_ACP, 0, copy, -1, dll, strlen(copy) + 4);
-                lstrcatW(dll, dot_dll);
-                module = qemu_LoadLibrary(dll);
-                my_free(dll);
-                if (module)
-                {
-                    funcptr = qemu_GetProcAddress(module, func);
-                    qemu_log_mask(LOG_WIN32, "Found export %s in DLL %s.dll(%p)\n", func, copy, module);
-                }
-                else
-                {
-                    fprintf(stderr, "Module %s.dll for forwarded export %s.%s not found.\n", copy,
-                            copy, func);
-                    funcptr = NULL;
-                }
-
-                free(copy);
+                if ((const char *)funcptr >= (const char *)exports &&
+                        (const char *)funcptr < (const char *)exports + export_size)
+                    funcptr = find_forwarded_export(module, funcptr, name, 0);
+                return funcptr;
             }
-            return funcptr;
         }
+        fprintf(stderr, "Export %s not found.\n", name);
     }
-    fprintf(stderr, "Export %s not found.\n", name);
+    else
+    {
+        int ordinal = LOWORD(name);
+        qemu_log_mask(LOG_WIN32, "Loading ordinal %d, base %u\n", ordinal, exports->Base);
+        if (ordinal >= exports->NumberOfFunctions + exports->Base)
+        {
+            fprintf(stderr, "Ordinal %d out of range, have %d!\n", ordinal,
+                    exports->NumberOfFunctions + exports->Base);
+            return NULL;
+        }
+        if (!functions[ordinal - exports->Base])
+        {
+            fprintf(stderr, "Export %d is NULL!\n", ordinal);
+            return NULL;
+        }
+
+        funcptr = get_rva(module, functions[ordinal - exports->Base]);
+
+        if ((const char *)funcptr >= (const char *)exports &&
+                (const char *)funcptr < (const char *)exports + export_size)
+            funcptr = find_forwarded_export(module, funcptr, NULL, ordinal - exports->Base);
+
+        return funcptr;
+    }
+
     return NULL;
 }
 
@@ -227,17 +266,38 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
             protect_size *= sizeof(*thunk);
             VirtualProtect(protect_base, protect_size, PAGE_READWRITE, &old_protect);
 
-            while(thunk->u1.Function)
+            while(thunk->u1.Ordinal)
             {
-                IMAGE_IMPORT_BY_NAME *function_name = get_rva(module, thunk->u1.Function);
-                const void *impl = qemu_GetProcAddress(lib, (const char *)function_name->Name);
-                if (!impl)
+                const void *impl;
+
+                if (IMAGE_SNAP_BY_ORDINAL(thunk->u1.Ordinal))
                 {
-                    fprintf(stderr, "Imported symbol %s not found in %s.\n",
-                            function_name->Name, lib_name);
-                    return FALSE;
+                    INT_PTR ord = IMAGE_ORDINAL(thunk->u1.Ordinal);
+                    qemu_log_mask(LOG_WIN32, "Importing ordinal %ld.\n", ord);
+
+                    impl = qemu_GetProcAddress(lib, (const char *)ord);
+                    if (!impl)
+                    {
+                        fprintf(stderr, "Imported ordinal %ld not found in %s.\n",
+                                ord, lib_name);
+                        return FALSE;
+                    }
+                    qemu_log_mask(LOG_WIN32, "writing %ld to %p\n", ord, thunk);
                 }
-                qemu_log_mask(LOG_WIN32, "writing %s to %p\n", function_name->Name, thunk);
+                else
+                {
+                    IMAGE_IMPORT_BY_NAME *function_name = get_rva(module, thunk->u1.Function);
+                    qemu_log_mask(LOG_WIN32, "Importing function %s.\n", (const char *)function_name->Name);
+
+                    impl = qemu_GetProcAddress(lib, (const char *)function_name->Name);
+                    if (!impl)
+                    {
+                        fprintf(stderr, "Imported symbol %s not found in %s.\n",
+                                function_name->Name, lib_name);
+                        return FALSE;
+                    }
+                    qemu_log_mask(LOG_WIN32, "writing %s to %p\n", function_name->Name, thunk);
+                }
                 *(const void **)thunk = impl;
                 thunk++;
             }
