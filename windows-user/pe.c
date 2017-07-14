@@ -230,7 +230,7 @@ static BOOL fixup_imports(HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *imports
                     return FALSE;
                 }
                 qemu_log_mask(LOG_WIN32, "writing %s to %p\n", function_name->Name, thunk);
-                *(const void **)thunk = impl; /* FIXME: Why do I need the offset? */
+                *(const void **)thunk = impl;
                 thunk++;
             }
         }
