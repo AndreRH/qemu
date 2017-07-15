@@ -130,6 +130,9 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
     if (!ret)
         ret = load_libray(name);
 
+    if (!ret)
+        fprintf(stderr, "Library %s not found or failed to load.\n", wine_dbgstr_w(name));
+
     return ret;
 }
 
