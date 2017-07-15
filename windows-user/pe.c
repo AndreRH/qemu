@@ -25,6 +25,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu-version.h"
+#include "windows-user/win_syscall.h"
 
 #include "qapi/error.h"
 #include "qemu.h"
@@ -49,10 +50,12 @@ struct library_cache_entry
     WCHAR name[MAX_PATH];
     WCHAR fullpath[MAX_PATH];
     unsigned int ref;
+    unsigned int load_depth;
 };
 
 static struct library_cache_entry *library_cache;
 static unsigned int library_cache_size, loaded_libraries;
+static unsigned int max_load_depth;
 
 static inline void *get_rva(HMODULE module, DWORD va)
 {
@@ -452,6 +455,7 @@ static HMODULE load_libray(const WCHAR *name)
     WCHAR new_name[MAX_PATH + 10];
     const WCHAR *load_name = name;
     struct library_cache_entry *new_cache;
+    static unsigned int depth;
 
     if (lstrlenW(name) > (ARRAY_SIZE(library_cache[0].name) - 1))
     {
@@ -459,6 +463,7 @@ static HMODULE load_libray(const WCHAR *name)
         return NULL;
     }
 
+    depth++;
     file = CreateFileW(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (file == INVALID_HANDLE_VALUE)
     {
@@ -703,15 +708,20 @@ static HMODULE load_libray(const WCHAR *name)
         {
             library_cache[i].mod = base;
             library_cache[i].ref = 1;
+            library_cache[i].load_depth = depth;
+            if (max_load_depth < depth)
+                max_load_depth = depth;
             lstrcpyW(library_cache[i].name, name);
             GetFullPathNameW(load_name, ARRAY_SIZE(library_cache[i].fullpath), library_cache[i].fullpath, NULL);
             loaded_libraries++;
+            depth--;
             return base;
         }
     }
     fprintf(stderr, "Library cache error.\n");
 
 error:
+    depth--;
     if (base)
         VirtualFree(base, 0, MEM_RELEASE);
     if (file)
@@ -733,5 +743,99 @@ void qemu_get_image_info(const HMODULE module, struct qemu_pe_image *info)
 BOOL qemu_FreeLibrary(HMODULE module)
 {
     fprintf(stderr, "FreeLibrary unimplemented\n");
+    return TRUE;
+}
+
+static NTSTATUS call_DllMain(uint64_t func, HMODULE mod, DWORD reason, void *reserved)
+{
+    /* qemu_execute supports only one parameter, and we don't have a natural way to
+     * compile guest code, so we have to dump the wrapper that unpacks the structure
+     * here in bytecode form. I could of course extend qemu_execute to support more
+     * params, but I am not convinced this would be easier, as it would still need
+     * platform-specific handling.
+     *
+     * #include <windows.h>
+     * #include <stdint.h>
+     *
+     * struct DllMain_call_data
+     * {
+     *     uint64_t func;
+     *     uint64_t module;
+     *     uint64_t reason;
+     *     uint64_t reserved;
+     * };
+     *
+     *  typedef DWORD (CALLBACK *DLLENTRYPROC)(HMODULE,DWORD,LPVOID);
+     *
+     *  uint64_t call_init(const struct DllMain_call_data *f)
+     *  {
+     *      DLLENTRYPROC proc = (DLLENTRYPROC)f->func;
+     *      return proc((HMODULE)f->module, f->reason, (void *)f->reserved);
+     *  }
+     */
+    static const char x86_64_wrapper[] =
+    {
+        0x48, 0x83, 0xec, 0x28,     /* sub    $0x28,%rsp        */
+        0x48, 0x89, 0xc8,           /* mov    %rcx,%rax         */
+        0x48, 0x8b, 0x49, 0x08,     /* mov    0x8(%rcx),%rcx    */
+        0x4c, 0x8b, 0x40, 0x18,     /* mov    0x18(%rax),%r8    */
+        0x8b, 0x50, 0x10,           /* mov    0x10(%rax),%edx   */
+        0xff, 0x10,                 /* callq  *(%rax)           */
+        0x89, 0xc0,                 /* mov    %eax,%eax ???     */
+        0x48, 0x83, 0xc4, 0x28,     /* add    $0x28,%rsp        */
+        0xc3,                       /* retq                     */
+    };
+    struct DllMain_call_data
+    {
+        uint64_t func;
+        uint64_t module;
+        uint64_t reason;
+        uint64_t reserved;
+    };
+
+    struct DllMain_call_data call = {func, (uint64_t)mod, reason, (uint64_t)reserved};
+
+    return qemu_execute(x86_64_wrapper, QEMU_H2G(&call));
+}
+
+BOOL qemu_call_process_init(void)
+{
+    unsigned int i, depth;
+    uint64_t entry;
+    BOOL retval;
+    const IMAGE_NT_HEADERS *nt;
+
+    for (depth = max_load_depth; depth > 0; --depth)
+    {
+        for (i = 0; i < library_cache_size; ++i)
+        {
+            struct library_cache_entry *cur = &library_cache[i];
+            if (!cur->mod || cur->load_depth != depth)
+                continue;
+
+            nt = RtlImageNtHeader(cur->mod);
+            if (!(nt->FileHeader.Characteristics & IMAGE_FILE_DLL))
+            {
+                qemu_log_mask(LOG_WIN32, "Module %s is not a DLL.\n", wine_dbgstr_w(cur->name));
+                continue;
+            }
+            if (!nt->OptionalHeader.AddressOfEntryPoint)
+            {
+                qemu_log_mask(LOG_WIN32, "Module %s has no DllMain function.\n", wine_dbgstr_w(cur->name));
+                continue;
+            }
+            entry = (UINT_PTR)cur->mod + nt->OptionalHeader.AddressOfEntryPoint;
+
+            qemu_log_mask(LOG_WIN32, "Calling DllMain of module %s at 0x%lx\n", wine_dbgstr_w(cur->name), entry);
+            retval = call_DllMain(entry, cur->mod, DLL_PROCESS_ATTACH, (void *)1);
+
+            if (!retval)
+            {
+                fprintf(stderr, "Module %s failed to initialize.\n", wine_dbgstr_w(cur->name));
+                return FALSE;
+            }
+        }
+    }
+
     return TRUE;
 }

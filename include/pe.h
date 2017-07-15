@@ -14,5 +14,6 @@ struct qemu_pe_image
 };
 
 void qemu_get_image_info(const HMODULE module, struct qemu_pe_image *info);
+BOOL qemu_call_process_init(void);
 
 #endif
