@@ -565,6 +565,13 @@ int main(int argc, char **argv, char **envp)
 
     qemu_log("CPU Setup done\n");
 
+    if (!qemu_call_process_init())
+    {
+        fprintf(stderr, "Process initialization failed.\n");
+        ExitProcess(EXIT_FAILURE);
+    }
+    qemu_log("Process init done.\n");
+
     /* Apparently it is valid to return from the main function, so push our return code.
      * Reserve the usual 32 byte parameter shadow space too, as per win64 calling convention. */
     env = thread_cpu->env_ptr;
