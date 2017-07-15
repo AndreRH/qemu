@@ -19,6 +19,8 @@
 #include "qemu/osdep.h"
 #include "qemu-version.h"
 
+#include <wine/library.h>
+
 #include "qapi/error.h"
 #include "qemu.h"
 #include "qemu/path.h"
@@ -504,6 +506,17 @@ int main(int argc, char **argv, char **envp)
     parallel_cpus = true;
 
     optind = parse_args(argc, argv);
+    /* This is kinda dirty. It is too late to have an effect on kernel32 initialization,
+     * but it should work OK for msvcrt because qemu doesn't link against msvcrt and the
+     * library is not yet loaded. Turns out this is exactly what we want, but that's
+     * more of a lucky coincidence than by design.
+     *
+     * It would be a bit more reliable if we added the offset before returning it to the
+     * app, but msvcrt's getmainargs() has an option to expand wildcards, which makes
+     * everything unpredictable. */
+    __wine_main_argc -= optind;
+    __wine_main_argv += optind;
+    __wine_main_wargv += optind;
 
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
@@ -535,7 +548,7 @@ int main(int argc, char **argv, char **envp)
         {
             /* Re-add quotes. */
             strcat(cmdline, " \"");
-            /* FIXME: If there are any quotes in this, I'll probably have to escape them. */
+            /* FIXME: Copy build_command_line from wine's kernel32.dll. */
             strcat(cmdline, argv[i]);
             strcat(cmdline, "\"");
         }
