@@ -65,6 +65,8 @@ static inline void *get_rva(HMODULE module, DWORD va)
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
 {
     unsigned int i;
+    size_t len;
+    WCHAR *name2 = NULL;
 
     if (flags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS)
         fprintf(stderr, "GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS not implemented\n");
@@ -73,6 +75,22 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
 
     if (!name)
         return guest_PEB.ImageBaseAddress;
+
+    /* Add .dll if it is not there yet. */
+    len = lstrlenW(name);
+    if (len <= 4 || name[len - 4] != '.' || (name[len - 3] != 'd' && name[len - 3] != 'D')
+            || (name[len - 2] != 'l' && name[len - 2] != 'L')
+            || (name[len - 1] != 'l' && name[len - 1] != 'L'))
+    {
+        name2 = my_alloc((len + 5) * sizeof(*name2));
+        memcpy(name2, name, len * sizeof(*name2));
+        name2[len++] = '.';
+        name2[len++] = 'd';
+        name2[len++] = 'l';
+        name2[len++] = 'l';
+        name2[len] = 0;
+        name = name2;
+    }
 
     for (i = 0; i < library_cache_size; ++i)
     {
@@ -83,12 +101,14 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
             qemu_log_mask(LOG_WIN32, "Already loaded library %s\n", wine_dbgstr_w(name));
             if (!(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
                 library_cache[i].ref++;
+            my_free(name2);
             return library_cache[i].mod;
         }
     }
 
     qemu_log_mask(LOG_WIN32, "Module %s not yet loaded\n", wine_dbgstr_w(name));
 
+    my_free(name2);
     return NULL;
 }
 
