@@ -162,4 +162,7 @@ void *qemu_getTEB(void);
 
 extern PEB guest_PEB;
 
+extern BOOL (WINAPI *pPathRemoveFileSpecA)(char *path);
+extern BOOL (WINAPI *pPathRemoveFileSpecW)(WCHAR *path);
+
 #endif /* QEMU_H */

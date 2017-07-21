@@ -55,6 +55,9 @@ static RTL_USER_PROCESS_PARAMETERS process_params;
 __thread CPUState *thread_cpu;
 __thread TEB *guest_teb;
 
+BOOL (WINAPI *pPathRemoveFileSpecA)(char *path);
+BOOL (WINAPI *pPathRemoveFileSpecW)(WCHAR *path);
+
 bool qemu_cpu_is_self(CPUState *cpu)
 {
     qemu_log("qemu_cpu_is_self unimplemented.\n");
@@ -497,7 +500,7 @@ static int parse_args(int argc, char **argv)
 
 int main(int argc, char **argv, char **envp)
 {
-    HMODULE exe_module;
+    HMODULE exe_module, shlwapi_module;
     CPUX86State *env;
     int optind, i, len;
     char *cmdline;
@@ -521,6 +524,25 @@ int main(int argc, char **argv, char **envp)
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
+
+    shlwapi_module = LoadLibraryA("shlwapi.dll");
+    if (!shlwapi_module)
+    {
+        fprintf(stderr, "Cannot load shlwapi.dll\n");
+        ExitProcess(1);
+    }
+    pPathRemoveFileSpecA = (void *)GetProcAddress(shlwapi_module, "PathRemoveFileSpecA");
+    if (!pPathRemoveFileSpecA)
+    {
+        fprintf(stderr, "PathRemoveFileSpecA not found in shlwapi.dll\n");
+        ExitProcess(1);
+    }
+    pPathRemoveFileSpecW = (void *)GetProcAddress(shlwapi_module, "PathRemoveFileSpecW");
+    if (!pPathRemoveFileSpecW)
+    {
+        fprintf(stderr, "PathRemoveFileSpecW not found in shlwapi.dll\n");
+        ExitProcess(1);
+    }
 
     i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
     filenameW = my_alloc(i * sizeof(*filenameW));
