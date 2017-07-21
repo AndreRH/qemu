@@ -63,7 +63,6 @@ BOOL load_host_dlls(void)
     GetModuleFileNameA(NULL, path, MAX_PATH);
     pPathRemoveFileSpecA(path);
     strcat(path, "\\qemu_host_dll\\*");
-    fprintf(stderr, "path: %s\n", path);
     find_handle = FindFirstFileA(path, &find_data);
     if (find_handle == INVALID_HANDLE_VALUE)
     {
