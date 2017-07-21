@@ -490,10 +490,12 @@ static HMODULE load_libray(const WCHAR *name)
     file = CreateFileW(name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (file == INVALID_HANDLE_VALUE)
     {
-        static const WCHAR qemu_guest_dll[] = {'q', 'e', 'm', 'u', '_', 'g', 'u', 'e', 's', 't', '_', 'd', 'l', 'l', '\\', 0};
+        static const WCHAR qemu_guest_dll[] = {'\\','q', 'e', 'm', 'u', '_', 'g', 'u', 'e', 's', 't', '_', 'd', 'l', 'l', '\\', 0};
 
         /* FIXME: Implement a proper search path system. */
-        lstrcpyW(new_name, qemu_guest_dll);
+        GetModuleFileNameW(NULL, new_name, MAX_PATH);
+        pPathRemoveFileSpecW(new_name);
+        lstrcatW(new_name, qemu_guest_dll);
         lstrcatW(new_name, name);
         file = CreateFileW(new_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
         if (file == INVALID_HANDLE_VALUE)
