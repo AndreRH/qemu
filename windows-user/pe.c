@@ -114,7 +114,7 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
 
 DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size)
 {
-    unsigned int i;
+    unsigned int i, len;
 
     if (!module)
         module = qemu_GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL);
@@ -124,11 +124,11 @@ DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size)
         if (module != library_cache[i].mod)
             continue;
 
-        i = lstrlenW(library_cache[i].fullpath) + 1;
-        if (i < size)
+        len = lstrlenW(library_cache[i].fullpath) + 1;
+        if (len < size)
         {
-            memcpy(filename, library_cache[i].fullpath, i * sizeof(*filename));
-            return i;
+            memcpy(filename, library_cache[i].fullpath, len * sizeof(*filename));
+            return len;
         }
         else
         {
