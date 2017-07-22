@@ -172,21 +172,43 @@ static const void *find_forwarded_export(HMODULE module, const void *funcptr, co
     func++;
     qemu_log_mask(LOG_WIN32, "Dll %s export %s\n", copy, func);
 
-    dll = my_alloc(sizeof(dll) * (strlen(copy) + 4));
-    MultiByteToWideChar(CP_ACP, 0, copy, -1, dll, strlen(copy) + 4);
-    lstrcatW(dll, dot_dll);
-    module = qemu_LoadLibrary(dll);
-    my_free(dll);
-    if (module)
+    if (!strcmp(func, "__qemu_native_data__"))
     {
-        funcptr = qemu_GetProcAddress(module, func);
-        qemu_log_mask(LOG_WIN32, "Found export %s in DLL %s.dll(%p)\n", func, copy, module);
+        qemu_log_mask(LOG_WIN32, "Forwarding data export of host library %s.\n", copy);
+        /* During process init we don't have the host wrappers loaded at this point,
+         * so the Windows library might not be loaded either. Load it. Don't care about
+         * the library refcount because the host part of the wrapper will contantly
+         * keep it around anyway. */
+        module = LoadLibraryA(copy);
+        if (name)
+        {
+            funcptr = GetProcAddress(module, name);
+        }
+        else
+        {
+            funcptr = NULL;
+            fprintf(stderr, "Ordinal is a data forward, implement this!\n");
+        }
+        qemu_log_mask(LOG_WIN32, "Returning data pointer %p from host library.\n", funcptr);
     }
     else
     {
-        fprintf(stderr, "Module %s.dll for forwarded export %s.%s not found.\n", copy,
-                copy, func);
-        funcptr = NULL;
+        dll = my_alloc(sizeof(dll) * (strlen(copy) + 4));
+        MultiByteToWideChar(CP_ACP, 0, copy, -1, dll, strlen(copy) + 4);
+        lstrcatW(dll, dot_dll);
+        module = qemu_LoadLibrary(dll);
+        my_free(dll);
+        if (module)
+        {
+            funcptr = qemu_GetProcAddress(module, func);
+            qemu_log_mask(LOG_WIN32, "Found export %s in DLL %s.dll(%p)\n", func, copy, module);
+        }
+        else
+        {
+            fprintf(stderr, "Module %s.dll for forwarded export %s.%s not found.\n", copy,
+                    copy, func);
+            funcptr = NULL;
+        }
     }
 
     free(copy);
