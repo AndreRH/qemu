@@ -224,6 +224,7 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
     const IMAGE_EXPORT_DIRECTORY *exports = NULL;
     const DWORD *names, *functions;
     const void *funcptr;
+    const WORD *ordinals;
 
     exports = RtlImageDirectoryEntryToData(module, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &export_size);
     if (!exports)
@@ -234,15 +235,16 @@ const void *qemu_GetProcAddress(HMODULE module, const char *name)
 
     names = get_rva(module, exports->AddressOfNames);
     functions = get_rva(module, exports->AddressOfFunctions);
+    ordinals = get_rva(module, exports->AddressOfNameOrdinals);
 
     if ((ULONG_PTR)name >> 16)
     {
         for (i = 0; i < exports->NumberOfFunctions; ++i)
         {
             const char *exportname = get_rva(module, names[i]);
-            funcptr = get_rva(module, functions[i]);
             if (!strcmp(exportname, name))
             {
+                funcptr = get_rva(module, functions[ordinals[i]]);
                 if ((const char *)funcptr >= (const char *)exports &&
                         (const char *)funcptr < (const char *)exports + export_size)
                     funcptr = find_forwarded_export(module, funcptr, name, 0);
