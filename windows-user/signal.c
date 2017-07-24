@@ -2,6 +2,7 @@
  *  qemu user main
  *
  *  Copyright (c) 2003-2008 Fabrice Bellard
+ *  Copyright (c) 2017 André Hentschel
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,10 +28,16 @@ static LONG WINAPI exception_handler(EXCEPTION_POINTERS *exception)
     CPUX86State *env = thread_cpu->env_ptr;
     CPUState *cpu = ENV_GET_CPU(env);
 
-    /* FIXME: Check for host exception */
-    /* FIXME: Unsure about cpu_exit and +env->segs[R_CS].base */
-    cpu_exit(thread_cpu);
+    cpu_restore_state(cpu, (uintptr_t)exception->ExceptionRecord->ExceptionAddress + GETPC_ADJ, true);
+    /* FIXME: Unsure about +env->segs[R_CS].base */
     fprintf(stderr, "Unhandled exception triggered at %lx\n", env->eip + env->segs[R_CS].base);
+
+    if (!cpu || !cpu->running)
+    {
+        fprintf(stderr, "This is a host exception\n");
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
     cpu_dump_state(cpu, stderr, fprintf, 0);
     ExitProcess(EXIT_FAILURE);
     return EXCEPTION_CONTINUE_SEARCH;
