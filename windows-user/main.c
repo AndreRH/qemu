@@ -283,9 +283,10 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
 {
     CPUState *cs;
     CPUX86State *env;
-    uint64_t backup_eip, backup_ecx, backup_esp;
+    uint64_t backup_eip, retval;
+    target_ulong backup_regs[CPU_NB_REGS];
 
-    /* The basic idea of this function is to back up some registers, write the function argument
+    /* The basic idea of this function is to back up all registers, write the function argument
      * into rcx, reserve stack space on the guest stack as the Win64 calling convention mandates
      * and call the emulated CPU to execute the requested code.
      *
@@ -295,7 +296,13 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
      * an syscall(rcx=0) instruction. The this interrupt the CPU and cpu_loop recognizes the
      * zero value and returns gracefully.
      *
-     * Afterwards restore registers and read the return value from EAX / RAX. */
+     * Afterwards restore registers and read the return value from EAX / RAX.
+     *
+     * Note that we're also storing caller-saved registers. From the view of our guest libraries
+     * it is doing a syscall and not a function call, so it doesn't know it has to back up caller-
+     * saved regs. We could alternatively tell gcc to clobber everything that is not callee-saved.
+     * However, syscalls happen very often and callbacks into app code are relatively rare. Keep
+     * the backup cost on the callback side. It's also a host memcpy vs emulated code. */
     cs = thread_cpu;
     if (!cs)
     {
@@ -307,8 +314,7 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
     env = cs->env_ptr;
 
     backup_eip = env->eip;
-    backup_ecx = env->regs[R_ECX];
-    backup_esp = env->regs[R_ESP];
+    memcpy(backup_regs, env->regs, sizeof(backup_regs));
     env->regs[R_ECX] = rcx;
 
     /* FIXME: This is 64 bit specific. Implement the 32 bit WINAPI calling convention too. */
@@ -319,12 +325,12 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
     qemu_log("Going to call guest code %p.\n", code);
     cpu_loop(code);
 
-    env->regs[R_ECX] = backup_ecx;
-    env->regs[R_ESP] = backup_esp;
+    retval = env->regs[R_EAX];
+    memcpy(env->regs, backup_regs, sizeof(backup_regs));
     env->eip = backup_eip;
 
-    qemu_log("retval %lx.\n", env->regs[R_EAX]);
-    return env->regs[R_EAX];
+    qemu_log("retval %lx.\n", retval);
+    return retval;
 }
 
 static void usage(int exitcode);
