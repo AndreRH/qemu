@@ -37,6 +37,7 @@ struct qemu_ops
     void *(*qemu_getTEB)(void);
     HMODULE (*qemu_LoadLibrary)(const WCHAR *name);
     void (*qemu_set_except_handler)(uint64_t handler);
+    void (*qemu_set_call_entry)(uint64_t call_entry);
 };
 
 typedef void (*syscall_handler)(struct qemu_syscall *call);
