@@ -288,5 +288,5 @@ typedef struct DECLSPEC_ALIGN(16) {
     DWORD64 LastExceptionFromRip; /* 4c8 */
 } CONTEXT_X86_64;
 
-extern uint64_t guest_exception_handler;
+extern uint64_t guest_exception_handler, guest_call_entry;
 #endif /* QEMU_H */
