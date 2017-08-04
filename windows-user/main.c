@@ -56,7 +56,7 @@ __thread CPUState *thread_cpu;
 __thread TEB *guest_teb;
 
 /* Helper function to read the TEB exception filter chain. */
-uint64_t guest_exception_handler;
+uint64_t guest_exception_handler, guest_call_entry;
 
 BOOL (WINAPI *pPathRemoveFileSpecA)(char *path);
 BOOL (WINAPI *pPathRemoveFileSpecW)(WCHAR *path);
@@ -583,10 +583,10 @@ static int parse_args(int argc, char **argv)
 int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module, shlwapi_module;
-    CPUX86State *env;
     int optind, i, len;
     char *cmdline;
     WCHAR *filenameW;
+    int ret;
 
     parallel_cpus = true;
 
@@ -689,14 +689,9 @@ int main(int argc, char **argv, char **envp)
     }
     qemu_log("Process init done.\n");
 
-    /* Apparently it is valid to return from the main function, so push our return code.
-     * Reserve the usual 32 byte parameter shadow space too, as per win64 calling convention. */
-    env = thread_cpu->env_ptr;
-    env->regs[R_ESP] -= 0x28;
-    *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
+    /* Should not return, guest_call_entry calls ExitProcess if need be. */
+    ret = qemu_execute(QEMU_G2H(guest_call_entry), QEMU_H2G(image.entrypoint));
 
-    cpu_loop(image.entrypoint);
-
-    qemu_log("Main function returned, result %lu.\n", env->regs[R_EAX]);
-    return env->regs[R_EAX];
+    fprintf(stderr, "Main function returned, result %u.\n", ret);
+    return ret;
 }
