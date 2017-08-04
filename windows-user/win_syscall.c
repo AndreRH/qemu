@@ -38,6 +38,11 @@ static void qemu_set_except_handler(uint64_t handler)
     guest_exception_handler = handler;
 }
 
+static void qemu_set_call_entry(uint64_t call_entry)
+{
+    guest_call_entry = call_entry;
+}
+
 static const struct qemu_ops ops =
 {
     qemu_execute,
@@ -48,6 +53,7 @@ static const struct qemu_ops ops =
     qemu_getTEB,
     qemu_LoadLibrary,
     qemu_set_except_handler,
+    qemu_set_call_entry,
 };
 
 BOOL load_host_dlls(void)
