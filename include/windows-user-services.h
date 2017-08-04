@@ -36,6 +36,7 @@ struct qemu_ops
     const void *(*qemu_GetProcAddress)(HMODULE module, const char *name);
     void *(*qemu_getTEB)(void);
     HMODULE (*qemu_LoadLibrary)(const WCHAR *name);
+    void (*qemu_set_except_handler)(uint64_t handler);
 };
 
 typedef void (*syscall_handler)(struct qemu_syscall *call);

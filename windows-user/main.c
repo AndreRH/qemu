@@ -55,6 +55,9 @@ static RTL_USER_PROCESS_PARAMETERS process_params;
 __thread CPUState *thread_cpu;
 __thread TEB *guest_teb;
 
+/* Helper function to read the TEB exception filter chain. */
+uint64_t guest_exception_handler;
+
 BOOL (WINAPI *pPathRemoveFileSpecA)(char *path);
 BOOL (WINAPI *pPathRemoveFileSpecW)(WCHAR *path);
 
@@ -238,12 +241,63 @@ static void init_thread_cpu(void)
     thread_cpu = cpu;
 }
 
+static void cpu_env_to_context(CONTEXT_X86_64 *context, const CPUX86State *env)
+{
+    memset(context, 0, sizeof(*context));
+
+    /* PXhome */
+
+    context->ContextFlags = QEMU_CONTEXT_CONTROL | QEMU_CONTEXT_INTEGER | QEMU_CONTEXT_SEGMENTS | QEMU_CONTEXT_DEBUG_REGISTERS;
+    context->MxCsr = env->mxcsr;
+
+    /* FIXME: Do I really want .selector? I'm not entirely sure how those segment regs work. */
+    context->SegCs = env->segs[R_CS].selector;
+    context->SegDs = env->segs[R_DS].selector;
+    context->SegEs = env->segs[R_ES].selector;
+    context->SegFs = env->segs[R_FS].selector;
+    context->SegGs = env->segs[R_GS].selector;
+    context->SegSs = env->segs[R_SS].selector;
+
+    context->EFlags = env->eflags;
+
+    context->Dr0 = env->dr[0];
+    context->Dr1 = env->dr[1];
+    context->Dr2 = env->dr[2];
+    context->Dr3 = env->dr[3];
+    context->Dr6 = env->dr[6];
+    context->Dr7 = env->dr[7];
+
+    context->Rax = env->regs[R_EAX];
+    context->Rbx = env->regs[R_EBX];
+    context->Rcx = env->regs[R_ECX];
+    context->Rdx = env->regs[R_EDX];
+    context->Rsp = env->regs[R_ESP];
+    context->Rbp = env->regs[R_EBP];
+    context->Rsi = env->regs[R_ESI];
+    context->Rdi = env->regs[R_EDI];
+    context->R8 = env->regs[8];
+    context->R9 = env->regs[9];
+    context->R10 = env->regs[10];
+    context->R11 = env->regs[11];
+    context->R12 = env->regs[12];
+    context->R13 = env->regs[13];
+    context->R14 = env->regs[13];
+    context->R15 = env->regs[15];
+    context->Rip = env->eip;
+
+    /* TODO: Floating point */
+
+}
+
 static void cpu_loop(const void *code)
 {
     CPUState *cs;
     CPUX86State *env;
     int trapnr;
     void *syscall;
+    EXCEPTION_POINTERS except;
+    EXCEPTION_RECORD exception_record;
+    CONTEXT_X86_64 guest_context;
 
     cs = thread_cpu;
     env = cs->env_ptr;
@@ -266,9 +320,26 @@ static void cpu_loop(const void *code)
                 continue;
 
             case EXCP0E_PAGE:
-                fprintf(stderr, "Got a page fault in user code.\n");
-                cpu_dump_state(cs, stderr, fprintf, 0);
-                return;
+                memset(&except, 0, sizeof(except));
+                except.ExceptionRecord = &exception_record;
+                except.ContextRecord = (void *)&guest_context;
+
+                memset(&exception_record, 0, sizeof(exception_record));
+                exception_record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
+                exception_record.ExceptionFlags = 0;
+                exception_record.ExceptionRecord = NULL;
+                exception_record.ExceptionAddress = (void *)env->eip;
+                exception_record.NumberParameters = 0;
+
+                cpu_env_to_context(&guest_context, env);
+
+                env->regs[R_ESP] -= 0x20; /* Reserve 32 bytes for the handler function. */
+
+                fprintf(stderr, "Got a page fault in user code, resuming execution at exception handler 0x%lx.\n",
+                        guest_exception_handler);
+                env->regs[R_ECX] = h2g(&except);
+                env->eip = guest_exception_handler;
+                continue;
 
             default:
                 fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);

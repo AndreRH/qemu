@@ -33,6 +33,11 @@ struct load_host_dlls
 static struct load_host_dlls *dlls;
 static unsigned int dll_count;
 
+static void qemu_set_except_handler(uint64_t handler)
+{
+    guest_exception_handler = handler;
+}
+
 static const struct qemu_ops ops =
 {
     qemu_execute,
@@ -42,6 +47,7 @@ static const struct qemu_ops ops =
     qemu_GetProcAddress,
     qemu_getTEB,
     qemu_LoadLibrary,
+    qemu_set_except_handler,
 };
 
 BOOL load_host_dlls(void)
