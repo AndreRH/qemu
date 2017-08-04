@@ -265,6 +265,11 @@ static void cpu_loop(const void *code)
                 do_syscall(syscall);
                 continue;
 
+            case EXCP0E_PAGE:
+                fprintf(stderr, "Got a page fault in user code.\n");
+                cpu_dump_state(cs, stderr, fprintf, 0);
+                return;
+
             default:
                 fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
                 cpu_dump_state(cs, stderr, fprintf, 0);
