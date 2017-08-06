@@ -333,10 +333,11 @@ static void cpu_loop(const void *code)
 
                 cpu_env_to_context(&guest_context, env);
 
-                env->regs[R_ESP] -= 0x20; /* Reserve 32 bytes for the handler function. */
-
                 fprintf(stderr, "Got a page fault in user code, resuming execution at exception handler 0x%lx.\n",
                         guest_exception_handler);
+                cpu_dump_state(cs, stderr, fprintf, 0);
+
+                env->regs[R_ESP] -= 0x20; /* Reserve 32 bytes for the handler function. */
                 env->regs[R_ECX] = h2g(&except);
                 env->eip = guest_exception_handler;
                 continue;
