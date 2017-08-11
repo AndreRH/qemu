@@ -6,6 +6,7 @@ DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size);
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name);
 const void *qemu_GetProcAddress(HMODULE module, const char *name);
 BOOL qemu_FreeLibrary(HMODULE module);
+BOOL qemu_FindEntryForAddress(void *addr, HMODULE *mod);
 
 struct qemu_pe_image
 {
