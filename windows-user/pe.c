@@ -908,3 +908,26 @@ BOOL qemu_call_process_init(void)
 
     return TRUE;
 }
+
+BOOL qemu_FindEntryForAddress(void *addr, HMODULE *mod)
+{
+    unsigned int i;
+    IMAGE_NT_HEADERS64 *nt;
+
+    for (i = 0; i < library_cache_size; ++i)
+    {
+        if (!library_cache[i].mod)
+            continue;
+
+        nt = RtlImageNtHeader(library_cache[i].mod);
+
+        if ((uint64_t)addr >= (uint64_t)library_cache[i].mod &&
+                (uint64_t)addr <= (uint64_t)library_cache[i].mod + nt->OptionalHeader.SizeOfImage)
+        {
+            *mod = library_cache[i].mod;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
