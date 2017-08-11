@@ -284,11 +284,13 @@ static void cpu_env_to_context(CONTEXT_X86_64 *context, const CPUX86State *env)
     context->R11 = env->regs[11];
     context->R12 = env->regs[12];
     context->R13 = env->regs[13];
-    context->R14 = env->regs[13];
+    context->R14 = env->regs[14];
     context->R15 = env->regs[15];
     context->Rip = env->eip;
 
-    /* TODO: Floating point */
+    /* TODO: Floating point. I am currently handling this in the exception handler. The qemu env
+     * struct is somewhat different from the floating point members of CONTEXT. x86_cpu_xsave_all_areas
+     * may help. */
 
 }
 
@@ -336,11 +338,15 @@ static void cpu_loop(const void *code)
 
                 cpu_env_to_context(&guest_context, env);
 
-                fprintf(stderr, "Got a page fault in user code, resuming execution at exception handler 0x%lx.\n",
-                        guest_exception_handler);
+                fprintf(stderr, "Got a page fault in user code, resuming execution at exception handler 0x%lx, rsp %p.\n",
+                        guest_exception_handler, (void *)env->regs[R_ESP]);
                 cpu_dump_state(cs, stderr, fprintf, 0);
 
                 env->regs[R_ESP] -= 0x20; /* Reserve 32 bytes for the handler function. */
+                /* It seems we have to deliberately misalign the stack by 8 bytes here because
+                 * we don't push a return address onto the stack. */
+                env->regs[R_ESP] &= ~0xf;
+                env->regs[R_ESP] += 8;
                 env->regs[R_ECX] = h2g(&except);
                 env->eip = guest_exception_handler;
                 continue;
