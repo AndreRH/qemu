@@ -237,6 +237,9 @@ static void init_thread_cpu(void)
     cpu_x86_load_seg(env, R_GS, 0);
     env->segs[R_GS].base = h2g(guest_teb);
 
+    guest_teb->Tib.StackBase = (void *)(h2g(stack) + image.stack_reserve);
+    guest_teb->Tib.StackLimit = (void *)h2g(stack);
+
     /* FIXME: Figure out how to free the CPU, stack, TEB and IDT on thread exit. */
     thread_cpu = cpu;
 }
