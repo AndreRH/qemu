@@ -4044,6 +4044,7 @@ void tcg_dump_info(FILE *f, fprintf_function cpu_fprintf)
 }
 #endif
 
+#undef ELF_HOST_MACHINE
 #ifdef ELF_HOST_MACHINE
 /* In order to use this feature, the backend needs to do three things:
 
@@ -4310,9 +4311,9 @@ static void tcg_register_jit_int(void *buf, size_t size,
 {
 }
 
-void tcg_register_jit(void *buf, size_t buf_size)
+/*void tcg_register_jit(void *buf, size_t buf_size)
 {
-}
+}*/
 #endif /* ELF_HOST_MACHINE */
 
 #if !TCG_TARGET_MAYBE_vec
