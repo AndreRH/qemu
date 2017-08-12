@@ -244,8 +244,10 @@ static void init_thread_cpu(void)
     thread_cpu = cpu;
 }
 
-static void cpu_env_to_context(CONTEXT_X86_64 *context, const CPUX86State *env)
+static void cpu_env_to_context(CONTEXT_X86_64 *context, CPUX86State *env)
 {
+    X86XSaveArea buf;
+
     memset(context, 0, sizeof(*context));
 
     /* PXhome */
@@ -288,10 +290,13 @@ static void cpu_env_to_context(CONTEXT_X86_64 *context, const CPUX86State *env)
     context->R15 = env->regs[15];
     context->Rip = env->eip;
 
-    /* TODO: Floating point. I am currently handling this in the exception handler. The qemu env
-     * struct is somewhat different from the floating point members of CONTEXT. x86_cpu_xsave_all_areas
-     * may help. */
-
+    /* Floating point. */
+    x86_cpu_xsave_all_areas(x86_env_get_cpu(env), &buf);
+    memcpy(&context->FltSave, &buf.legacy, sizeof(context->FltSave));
+    /* This is implicitly set to 0 by x86_cpu_xsave_all_areas (via memset),
+     * but the fxsave implementation in target/i386/fpu_helper.c sets it
+     * to the value below. */
+    context->FltSave.MxCsr_Mask = 0x0000ffff;
 }
 
 static void cpu_loop(const void *code)
