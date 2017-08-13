@@ -21,6 +21,7 @@
 
 #include <wine/library.h>
 #include <wine/debug.h>
+extern WCHAR *strstrW( const WCHAR *str, const WCHAR *sub );
 
 #include "qapi/error.h"
 #include "qemu.h"
@@ -714,8 +715,29 @@ static BOOL build_command_line(char **argv)
         p--;  /* remove last space */
     *p = '\0';
 
-    fprintf(stderr, "Built cmdline %s\n", wine_dbgstr_w(rupp->CommandLine.Buffer));
     return TRUE;
+}
+
+static void init_process_params(char **argv, const char *filenme)
+{
+    static const WCHAR qemu_x86_64exeW[] = {'q','e','m','u','-','x','8','6','_','6','4','.','e','x','e', 0};
+
+    /* FIXME: Wine allocates the string buffer right behind the process parameter structure. */
+    build_command_line(argv);
+    guest_PEB.ProcessParameters = &process_params;
+
+    /* FIXME: If no explicit title is given WindowTitle and ImagePathName are the same, except
+     * that WindowTitle has the .so ending removed. This could be used for a more reliable check.
+     *
+     * Is there a way to catch a case where the title is deliberately set to "qemu-x86_64.exe"? */
+    if (strstrW(NtCurrentTeb()->Peb->ProcessParameters->WindowTitle.Buffer, qemu_x86_64exeW))
+    {
+        RtlCreateUnicodeStringFromAsciiz(&guest_PEB.ProcessParameters->WindowTitle, filename);
+    }
+    else
+    {
+        guest_PEB.ProcessParameters->WindowTitle = NtCurrentTeb()->Peb->ProcessParameters->WindowTitle;
+    }
 }
 
 int main(int argc, char **argv, char **envp)
@@ -776,9 +798,7 @@ int main(int argc, char **argv, char **envp)
     qemu_get_image_info(exe_module, &image);
     guest_PEB.ImageBaseAddress = exe_module;
 
-    /* FIXME: Wine allocates the string buffer right behind the process parameter structure. */
-    build_command_line(argv + optind);
-    guest_PEB.ProcessParameters = &process_params;
+    init_process_params(argv + optind, filename);
 
     if (!load_host_dlls())
     {
