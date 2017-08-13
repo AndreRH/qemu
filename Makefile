@@ -314,7 +314,7 @@ LIBS+=-lz $(LIBS_TOOLS)
 vhost-user-json-y =
 HELPERS-y =
 
-HELPERS-$(call land,$(CONFIG_SOFTMMU),$(CONFIG_LINUX)) = qemu-bridge-helper$(EXESUF)
+HELPERS-$(call land,$(CONFIG_SOFTMMU),$(CONFIG_LINUX)) =
 
 ifdef CONFIG_LINUX
 ifdef CONFIG_VIRGL
