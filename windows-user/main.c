@@ -20,6 +20,7 @@
 #include "qemu-version.h"
 
 #include <wine/library.h>
+#include <wine/debug.h>
 
 #include "qapi/error.h"
 #include "qemu.h"
@@ -595,11 +596,132 @@ static int parse_args(int argc, char **argv)
     return optind;
 }
 
+static BOOL build_command_line(char **argv)
+{
+    int len;
+    char **arg;
+    LPWSTR p;
+    RTL_USER_PROCESS_PARAMETERS* rupp = &process_params;
+
+    if (rupp->CommandLine.Buffer) return TRUE; /* already got it from the server */
+
+    len = 0;
+    for (arg = argv; *arg; arg++)
+    {
+        BOOL has_space;
+        int bcount;
+        char* a;
+
+        has_space=FALSE;
+        bcount=0;
+        a=*arg;
+        if( !*a ) has_space=TRUE;
+        while (*a!='\0') {
+            if (*a=='\\') {
+                bcount++;
+            } else {
+                if (*a==' ' || *a=='\t') {
+                    has_space=TRUE;
+                } else if (*a=='"') {
+                    /* doubling of '\' preceding a '"',
+                     * plus escaping of said '"'
+                     */
+                    len+=2*bcount+1;
+                }
+                bcount=0;
+            }
+            a++;
+        }
+        len+=(a-*arg)+1 /* for the separating space */;
+        if (has_space)
+            len+=2+bcount; /* for the quotes and doubling of '\' preceding the closing quote */
+    }
+
+    if (!(rupp->CommandLine.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(WCHAR))))
+        return FALSE;
+
+    p = rupp->CommandLine.Buffer;
+    rupp->CommandLine.Length = (len - 1) * sizeof(WCHAR);
+    rupp->CommandLine.MaximumLength = len * sizeof(WCHAR);
+    for (arg = argv; *arg; arg++)
+    {
+        BOOL has_space,has_quote;
+        WCHAR* a, *argW;
+        int bcount;
+
+        bcount = MultiByteToWideChar(CP_ACP, 0, *arg, -1, NULL, 0);
+        argW = my_alloc(bcount * sizeof(*argW));
+        MultiByteToWideChar(CP_ACP, 0, *arg, -1, argW, bcount);
+
+        /* Check for quotes and spaces in this argument */
+        has_space=has_quote=FALSE;
+        a=argW;
+        if( !*a ) has_space=TRUE;
+        while (*a!='\0') {
+            if (*a==' ' || *a=='\t') {
+                has_space=TRUE;
+                if (has_quote)
+                    break;
+            } else if (*a=='"') {
+                has_quote=TRUE;
+                if (has_space)
+                    break;
+            }
+            a++;
+        }
+
+        /* Now transfer it to the command line */
+        if (has_space)
+            *p++='"';
+        if (has_quote || has_space) {
+            bcount=0;
+            a=argW;
+            while (*a!='\0') {
+                if (*a=='\\') {
+                    *p++=*a;
+                    bcount++;
+                } else {
+                    if (*a=='"') {
+                        int i;
+
+                        /* Double all the '\\' preceding this '"', plus one */
+                        for (i=0;i<=bcount;i++)
+                            *p++='\\';
+                        *p++='"';
+                    } else {
+                        *p++=*a;
+                    }
+                    bcount=0;
+                }
+                a++;
+            }
+        } else {
+            WCHAR* x = argW;
+            while ((*p=*x++)) p++;
+        }
+        if (has_space) {
+            int i;
+
+            /* Double all the '\' preceding the closing quote */
+            for (i=0;i<bcount;i++)
+                *p++='\\';
+            *p++='"';
+        }
+        *p++=' ';
+        my_free(argW);
+    }
+    if (p > rupp->CommandLine.Buffer)
+        p--;  /* remove last space */
+    *p = '\0';
+
+    fprintf(stderr, "Built cmdline %s\n", wine_dbgstr_w(rupp->CommandLine.Buffer));
+    return TRUE;
+}
+
 int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module, shlwapi_module;
-    int optind, i, len;
-    char *cmdline;
+    int optind, i;
     WCHAR *filenameW;
     int ret;
 
@@ -654,34 +776,9 @@ int main(int argc, char **argv, char **envp)
     qemu_get_image_info(exe_module, &image);
     guest_PEB.ImageBaseAddress = exe_module;
 
-    len = strlen(filename);
-    for (i = optind + 1; i < argc; ++i)
-        len += strlen(argv[i]) + 3; /* Space in front, plus quotes if necessary */
-    len++; /* Terminating zero. */
-    cmdline = my_alloc(len);
-
-    strcpy(cmdline, filename);
-    for (i = optind + 1; i < argc; ++i)
-    {
-        if (strpbrk(argv[i], " \t\n"))
-        {
-            /* Re-add quotes. */
-            strcat(cmdline, " \"");
-            /* FIXME: Copy build_command_line from wine's kernel32.dll. */
-            strcat(cmdline, argv[i]);
-            strcat(cmdline, "\"");
-        }
-        else
-        {
-            strcat(cmdline, " ");
-            strcat(cmdline, argv[i]);
-        }
-    }
-
     /* FIXME: Wine allocates the string buffer right behind the process parameter structure. */
+    build_command_line(argv + optind);
     guest_PEB.ProcessParameters = &process_params;
-    RtlCreateUnicodeStringFromAsciiz(&guest_PEB.ProcessParameters->CommandLine, cmdline);
-    my_free(cmdline);
 
     if (!load_host_dlls())
     {
