@@ -756,7 +756,6 @@ static void init_process_params(char **argv, const char *filenme)
     cwd[size - 1] = '\\';
     cwd[size] = 0;
     strcatW(cwd, qemu_x86_64exeW);
-    fprintf(stderr, "Cwd %s\n", wine_dbgstr_w(cwd));
     RtlInitUnicodeString(&guest_PEB.ProcessParameters->ImagePathName, cwd);
 
     guest_ldr.Length = sizeof(guest_ldr);
