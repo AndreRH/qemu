@@ -1395,6 +1395,38 @@ static void set_security_cookie( void *module, SIZE_T len )
     }
 }
 
+static IMAGE_BASE_RELOCATION * qemu_LdrProcessRelocationBlock( void *page, UINT count,
+                                                               USHORT *relocs, INT_PTR delta )
+{
+    while (count--)
+    {
+        USHORT offset = *relocs & 0xfff;
+        int type = *relocs >> 12;
+        switch(type)
+        {
+        case IMAGE_REL_BASED_ABSOLUTE:
+            break;
+        case IMAGE_REL_BASED_HIGH:
+            *(short *)((char *)page + offset) += HIWORD(delta);
+            break;
+        case IMAGE_REL_BASED_LOW:
+            *(short *)((char *)page + offset) += LOWORD(delta);
+            break;
+        case IMAGE_REL_BASED_HIGHLOW:
+            *(int *)((char *)page + offset) += delta;
+            break;
+        case IMAGE_REL_BASED_DIR64:
+            *(INT_PTR *)((char *)page + offset) += delta;
+            break;
+        default:
+            WINE_FIXME("Unknown/unsupported fixup type %x.\n", type);
+            return NULL;
+        }
+        relocs++;
+    }
+    return (IMAGE_BASE_RELOCATION *)relocs;  /* return address of next block */
+}
+
 static NTSTATUS perform_relocations( void *module, SIZE_T len )
 {
     IMAGE_NT_HEADERS *nt;
@@ -1458,7 +1490,7 @@ static NTSTATUS perform_relocations( void *module, SIZE_T len )
             WINE_WARN( "invalid address %p in relocation %p\n", get_rva( module, rel->VirtualAddress ), rel );
             return STATUS_ACCESS_VIOLATION;
         }
-        rel = LdrProcessRelocationBlock( get_rva( module, rel->VirtualAddress ),
+        rel = qemu_LdrProcessRelocationBlock( get_rva( module, rel->VirtualAddress ),
                                          (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT),
                                          (USHORT *)(rel + 1), delta );
         if (!rel) return STATUS_INVALID_IMAGE_FORMAT;
@@ -1475,7 +1507,7 @@ static NTSTATUS perform_relocations( void *module, SIZE_T len )
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS map_library(HANDLE file, void **module)
+static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
 {
     IMAGE_DOS_HEADER dos;
     struct nt_header nt;
@@ -1666,6 +1698,7 @@ static NTSTATUS map_library(HANDLE file, void **module)
     }
 
     *module = base;
+    *len = image_size;
     return base == image_base ? STATUS_SUCCESS : STATUS_IMAGE_NOT_AT_BASE;
 
 error:
@@ -1689,7 +1722,7 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
 
     WINE_TRACE("Trying native dll %s\n", wine_dbgstr_w(name));
 
-    status = map_library(file, &module);
+    status = map_library(file, &module, &len);
     if (status != STATUS_SUCCESS && status != STATUS_IMAGE_NOT_AT_BASE)
         return status;
 
@@ -2148,85 +2181,6 @@ NTSTATUS WINAPI LdrAddRefDll( ULONG flags, HMODULE module )
     RtlLeaveCriticalSection( &loader_section );
     return ret;
 }
-
-
-/***********************************************************************
- *           LdrProcessRelocationBlock  (NTDLL.@)
- *
- * Apply relocations to a given page of a mapped PE image.
- */
-IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count,
-                                                          USHORT *relocs, INT_PTR delta )
-{
-    while (count--)
-    {
-        USHORT offset = *relocs & 0xfff;
-        int type = *relocs >> 12;
-        switch(type)
-        {
-        case IMAGE_REL_BASED_ABSOLUTE:
-            break;
-        case IMAGE_REL_BASED_HIGH:
-            *(short *)((char *)page + offset) += HIWORD(delta);
-            break;
-        case IMAGE_REL_BASED_LOW:
-            *(short *)((char *)page + offset) += LOWORD(delta);
-            break;
-        case IMAGE_REL_BASED_HIGHLOW:
-            *(int *)((char *)page + offset) += delta;
-            break;
-#ifdef _WIN64
-        case IMAGE_REL_BASED_DIR64:
-            *(INT_PTR *)((char *)page + offset) += delta;
-            break;
-#elif defined(__arm__)
-        case IMAGE_REL_BASED_THUMB_MOV32:
-        {
-            DWORD inst = *(INT_PTR *)((char *)page + offset);
-            DWORD imm16 = ((inst << 1) & 0x0800) + ((inst << 12) & 0xf000) +
-                          ((inst >> 20) & 0x0700) + ((inst >> 16) & 0x00ff);
-            DWORD hi_delta;
-
-            if ((inst & 0x8000fbf0) != 0x0000f240)
-                WINE_ERR("wrong Thumb2 instruction %08x, expected MOVW\n", inst);
-
-            imm16 += LOWORD(delta);
-            hi_delta = HIWORD(delta) + HIWORD(imm16);
-            *(INT_PTR *)((char *)page + offset) = (inst & 0x8f00fbf0) + ((imm16 >> 1) & 0x0400) +
-                                                  ((imm16 >> 12) & 0x000f) +
-                                                  ((imm16 << 20) & 0x70000000) +
-                                                  ((imm16 << 16) & 0xff0000);
-
-            if (hi_delta != 0)
-            {
-                inst = *(INT_PTR *)((char *)page + offset + 4);
-                imm16 = ((inst << 1) & 0x0800) + ((inst << 12) & 0xf000) +
-                        ((inst >> 20) & 0x0700) + ((inst >> 16) & 0x00ff);
-
-                if ((inst & 0x8000fbf0) != 0x0000f2c0)
-                    WINE_ERR("wrong Thumb2 instruction %08x, expected MOVT\n", inst);
-
-                imm16 += hi_delta;
-                if (imm16 > 0xffff)
-                    WINE_ERR("resulting immediate value won't fit: %08x\n", imm16);
-                *(INT_PTR *)((char *)page + offset + 4) = (inst & 0x8f00fbf0) +
-                                                          ((imm16 >> 1) & 0x0400) +
-                                                          ((imm16 >> 12) & 0x000f) +
-                                                          ((imm16 << 20) & 0x70000000) +
-                                                          ((imm16 << 16) & 0xff0000);
-            }
-        }
-            break;
-#endif
-        default:
-            WINE_FIXME("Unknown/unsupported fixup type %x.\n", type);
-            return NULL;
-        }
-        relocs++;
-    }
-    return (IMAGE_BASE_RELOCATION *)relocs;  /* return address of next block */
-}
-
 
 /******************************************************************
  *		LdrQueryProcessModuleInformation
