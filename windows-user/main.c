@@ -21,7 +21,8 @@
 
 #include <wine/library.h>
 #include <wine/debug.h>
-extern WCHAR *strstrW( const WCHAR *str, const WCHAR *sub );
+#include <wine/unicode.h>
+#include <delayloadhandler.h>
 
 #include "qapi/error.h"
 #include "qemu.h"
@@ -52,7 +53,11 @@ unsigned long reserved_va;
 static struct qemu_pe_image image;
 
 PEB guest_PEB;
+static PEB_LDR_DATA guest_ldr;
 static RTL_USER_PROCESS_PARAMETERS process_params;
+static RTL_BITMAP guest_tls_bitmap;
+static RTL_BITMAP guest_tls_expansion_bitmap;
+static RTL_BITMAP guest_fls_bitmap;
 
 __thread CPUState *thread_cpu;
 __thread TEB *guest_teb;
@@ -136,7 +141,7 @@ static TEB *alloc_teb(void)
     return ret;
 }
 
-void *qemu_getTEB(void)
+TEB *qemu_getTEB(void)
 {
     return guest_teb;
 }
@@ -182,10 +187,10 @@ static void init_thread_cpu(void)
      *
      * Afaics when the reserved area is exhausted an exception is triggered and Windows does
      * not try to reserve more. Is this correct? */
-    stack = VirtualAlloc(NULL, image.stack_reserve, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    stack = VirtualAlloc(NULL, image.stack_reserve ? image.stack_reserve : DEFAULT_STACK_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (!stack)
     {
-        fprintf(stderr, "Could not reserve stack space.\n");
+        fprintf(stderr, "Could not reserve stack space size %u.\n", image.stack_reserve);
         ExitProcess(EXIT_FAILURE);
     }
     /* Stack grows down, so point to the end of the allocation. */
@@ -725,6 +730,7 @@ static void init_process_params(char **argv, const char *filenme)
     /* FIXME: Wine allocates the string buffer right behind the process parameter structure. */
     build_command_line(argv);
     guest_PEB.ProcessParameters = &process_params;
+    guest_PEB.LdrData = &guest_ldr;
 
     /* FIXME: If no explicit title is given WindowTitle and ImagePathName are the same, except
      * that WindowTitle has the .so ending removed. This could be used for a more reliable check.
@@ -738,6 +744,19 @@ static void init_process_params(char **argv, const char *filenme)
     {
         guest_PEB.ProcessParameters->WindowTitle = NtCurrentTeb()->Peb->ProcessParameters->WindowTitle;
     }
+
+    guest_ldr.Length = sizeof(guest_ldr);
+    guest_ldr.Initialized = TRUE;
+    RtlInitializeBitMap( &guest_tls_bitmap, guest_PEB.TlsBitmapBits, sizeof(guest_PEB.TlsBitmapBits) * 8 );
+    RtlInitializeBitMap( &guest_tls_expansion_bitmap, guest_PEB.TlsExpansionBitmapBits,
+                         sizeof(guest_PEB.TlsExpansionBitmapBits) * 8 );
+    RtlInitializeBitMap( &guest_fls_bitmap, guest_PEB.FlsBitmapBits, sizeof(guest_PEB.FlsBitmapBits) * 8 );
+    RtlSetBits( guest_PEB.TlsBitmap, 0, 1 ); /* TLS index 0 is reserved and should be initialized to NULL. */
+    RtlSetBits( guest_PEB.FlsBitmap, 0, 1 );
+    InitializeListHead( &guest_PEB.FlsListHead );
+    InitializeListHead( &guest_ldr.InLoadOrderModuleList );
+    InitializeListHead( &guest_ldr.InMemoryOrderModuleList );
+    InitializeListHead( &guest_ldr.InInitializationOrderModuleList );
 }
 
 int main(int argc, char **argv, char **envp)
@@ -785,6 +804,12 @@ int main(int argc, char **argv, char **envp)
         ExitProcess(1);
     }
 
+    tcg_exec_init(0);
+    tcg_prologue_init(tcg_ctx);
+    init_thread_cpu();
+
+    init_process_params(argv + optind, filename);
+
     i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
     filenameW = my_alloc(i * sizeof(*filenameW));
     MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, i);
@@ -798,7 +823,24 @@ int main(int argc, char **argv, char **envp)
     qemu_get_image_info(exe_module, &image);
     guest_PEB.ImageBaseAddress = exe_module;
 
-    init_process_params(argv + optind, filename);
+    if (image.stack_reserve != DEFAULT_STACK_SIZE)
+    {
+        void *stack;
+        CPUX86State *env = thread_cpu->env_ptr;
+
+        VirtualFree(guest_teb->Tib.StackLimit, 0, MEM_RELEASE);
+        stack = VirtualAlloc(NULL, image.stack_reserve, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        if (!stack)
+        {
+            fprintf(stderr, "Could not reserve stack space size %u.\n", image.stack_reserve);
+            ExitProcess(EXIT_FAILURE);
+        }
+
+        /* Stack grows down, so point to the end of the allocation. */
+        env->regs[R_ESP] = h2g(stack) + image.stack_reserve;
+        guest_teb->Tib.StackBase = (void *)(h2g(stack) + image.stack_reserve);
+        guest_teb->Tib.StackLimit = (void *)h2g(stack);
+    }
 
     if (!load_host_dlls())
     {
@@ -806,15 +848,11 @@ int main(int argc, char **argv, char **envp)
         ExitProcess(EXIT_FAILURE);
     }
 
-    tcg_exec_init(0);
-    tcg_prologue_init(tcg_ctx);
-    init_thread_cpu();
-
     signal_init();
 
     qemu_log("CPU Setup done\n");
 
-    if (!qemu_call_process_init())
+    if (qemu_LdrInitializeThunk())
     {
         fprintf(stderr, "Process initialization failed.\n");
         ExitProcess(EXIT_FAILURE);
