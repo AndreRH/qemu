@@ -158,12 +158,8 @@ static inline void my_free(void *p)
 }
 
 void signal_init(void);
-void *qemu_getTEB(void);
 
 extern PEB guest_PEB;
-
-extern BOOL (WINAPI *pPathRemoveFileSpecA)(char *path);
-extern BOOL (WINAPI *pPathRemoveFileSpecW)(WCHAR *path);
 
 #define QEMU_CONTEXT_AMD64   0x00100000
 

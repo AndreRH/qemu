@@ -104,7 +104,7 @@ update_cxxflags() {
 
     for arg in $QEMU_CFLAGS; do
         case $arg in
-            -Wstrict-prototypes|-Wmissing-prototypes|-Wnested-externs|\
+            -Wstrict-prototypes|-Wmissing-prototypes|\
             -Wold-style-declaration|-Wold-style-definition|-Wredundant-decls)
                 ;;
             -std=gnu99)
@@ -1892,7 +1892,7 @@ fi
 
 gcc_flags="-Wold-style-declaration -Wold-style-definition -Wtype-limits"
 gcc_flags="-Wformat-security -Wformat-y2k -Winit-self -Wignored-qualifiers $gcc_flags"
-gcc_flags="-Wno-missing-include-dirs -Wempty-body -Wnested-externs $gcc_flags"
+gcc_flags="-Wno-missing-include-dirs -Wempty-body $gcc_flags"
 gcc_flags="-Wendif-labels -Wno-shift-negative-value $gcc_flags"
 gcc_flags="-Wno-initializer-overrides -Wexpansion-to-defined $gcc_flags"
 gcc_flags="-Wno-string-plus-int $gcc_flags"
