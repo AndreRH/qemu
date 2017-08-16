@@ -196,7 +196,7 @@ static void init_thread_cpu(void)
     /* Stack grows down, so point to the end of the allocation. */
     env->regs[R_ESP] = h2g(stack) + image.stack_reserve;
 
-    env->idt.limit = 255;
+    env->idt.limit = 511;
     idt_table = my_alloc(sizeof(uint64_t) * (env->idt.limit + 1));
     env->idt.base = h2g(idt_table);
     set_idt(0, 0);
