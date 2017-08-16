@@ -1171,11 +1171,7 @@ done:
     return status;
 }
 
-/******************************************************************
- *		LdrDisableThreadCalloutsForDll (NTDLL.@)
- *
- */
-NTSTATUS WINAPI LdrDisableThreadCalloutsForDll(HMODULE hModule)
+static NTSTATUS qemu_LdrDisableThreadCalloutsForDll(HMODULE hModule)
 {
     WINE_MODREF *wm;
     NTSTATUS    ret = STATUS_SUCCESS;
@@ -3055,4 +3051,10 @@ void qemu_get_image_info(const HMODULE module, struct qemu_pe_image *info)
     info->entrypoint = (void *)((char *)module) + nt->opt.hdr64.AddressOfEntryPoint;
     info->stack_reserve = nt->opt.hdr64.SizeOfStackReserve;
     info->stack_commit = nt->opt.hdr64.SizeOfStackCommit;
+}
+
+BOOL qemu_DisableThreadLibraryCalls(HMODULE mod)
+{
+    NTSTATUS status = qemu_LdrDisableThreadCalloutsForDll(mod);
+    return status == STATUS_SUCCESS;
 }

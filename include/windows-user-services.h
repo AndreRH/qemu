@@ -39,6 +39,7 @@ struct qemu_ops
     void (*qemu_set_except_handler)(uint64_t handler);
     void (*qemu_set_call_entry)(uint64_t call_entry);
     BOOL (*qemu_FindEntryForAddress)(void *addr, HMODULE *mod);
+    BOOL (*qemu_DisableThreadLibraryCalls)(HMODULE mod);
 };
 
 typedef void (*syscall_handler)(struct qemu_syscall *call);
