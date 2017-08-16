@@ -2753,35 +2753,28 @@ error:
 
 BOOL qemu_FreeLibrary(HMODULE module)
 {
-    if (0)
+    BOOL                retv = FALSE;
+    NTSTATUS            nts;
+
+    if (!module)
     {
-        BOOL                retv = FALSE;
-        NTSTATUS            nts;
-
-        if (!module)
-        {
-            SetLastError( ERROR_INVALID_HANDLE );
-            return FALSE;
-        }
-
-        if ((ULONG_PTR)module & 1)
-        {
-            WINE_ERR("Did not expect to end up here\n");
-            ExitProcess(1);
-            /* this is a LOAD_LIBRARY_AS_DATAFILE module */
-            char *ptr = (char *)module - 1;
-            return UnmapViewOfFile( ptr );
-        }
-
-        if ((nts = qemu_LdrUnloadDll( module )) == STATUS_SUCCESS) retv = TRUE;
-        else SetLastError( RtlNtStatusToDosError( nts ) );
-
-        return retv;
+        SetLastError( ERROR_INVALID_HANDLE );
+        return FALSE;
     }
-    /* This causes d3dcompiler to crash when it is loaded again. May be a bug in unloading,
-     * or maybe the lack of exception handling when we call DllMain causes troubles. */
-    WINE_FIXME("Disabled for now\n");
-    return TRUE;
+
+    if ((ULONG_PTR)module & 1)
+    {
+        WINE_ERR("Did not expect to end up here\n");
+        ExitProcess(1);
+        /* this is a LOAD_LIBRARY_AS_DATAFILE module */
+        char *ptr = (char *)module - 1;
+        return UnmapViewOfFile( ptr );
+    }
+
+    if ((nts = qemu_LdrUnloadDll( module )) == STATUS_SUCCESS) retv = TRUE;
+    else SetLastError( RtlNtStatusToDosError( nts ) );
+
+    return retv;
 }
 
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
