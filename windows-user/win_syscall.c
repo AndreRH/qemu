@@ -22,6 +22,7 @@
 #include "qapi/error.h"
 #include "qemu.h"
 #include "win_syscall.h"
+#include "delayloadhandler.h"
 #include "pe.h"
 
 struct load_host_dlls
@@ -50,7 +51,7 @@ static const struct qemu_ops ops =
     qemu_GetModuleFileName,
     qemu_GetModuleHandleEx,
     qemu_GetProcAddress,
-    qemu_getTEB,
+    (void *)qemu_getTEB, /* Cast for (TEB *) -> (void *) */
     qemu_LoadLibrary,
     qemu_set_except_handler,
     qemu_set_call_entry,

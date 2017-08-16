@@ -110,7 +110,7 @@ update_cxxflags() {
 
     for arg in $QEMU_CFLAGS; do
         case $arg in
-            -Wstrict-prototypes|-Wmissing-prototypes|-Wnested-externs|\
+            -Wstrict-prototypes|-Wmissing-prototypes|\
             -Wold-style-declaration|-Wold-style-definition|-Wredundant-decls)
                 ;;
             -std=gnu99)
@@ -2083,7 +2083,6 @@ add_to warn_flags -Wformat-y2k
 add_to warn_flags -Winit-self
 add_to warn_flags -Wignored-qualifiers
 add_to warn_flags -Wempty-body
-add_to warn_flags -Wnested-externs
 add_to warn_flags -Wendif-labels
 add_to warn_flags -Wexpansion-to-defined
 
