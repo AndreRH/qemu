@@ -2771,7 +2771,7 @@ static WCHAR *MODULE_get_dll_load_path(const WCHAR *module)
      * process was loaded from */
     if (module == mod_end)
     {
-        module = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+        module = qemu_getTEB()->Peb->ProcessParameters->ImagePathName.Buffer;
         mod_end = get_module_path_end( module );
     }
     len += (mod_end - module) + 1;
@@ -2938,7 +2938,8 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
     {
         UNICODE_STRING wstr;
         RtlInitUnicodeString( &wstr, name );
-        status = LdrGetDllHandle( NULL, 0, &wstr, &ret );
+        /* FIXME: Should not need the path. Init DllPath in PEB properly. */
+        status = LdrGetDllHandle( MODULE_get_dll_load_path(NULL), 0, &wstr, &ret );
     }
 
     if (status == STATUS_SUCCESS)
