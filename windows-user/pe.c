@@ -1242,13 +1242,7 @@ NTSTATUS WINAPI qemu_LdrEnumerateLoadedModules( void *unknown, void *cb, void *c
     return STATUS_SUCCESS;
 }
 
-/******************************************************************
- *		LdrLockLoaderLock  (NTDLL.@)
- *
- * Note: some flags are not implemented.
- * Flag 0x01 is used to raise exceptions on errors.
- */
-NTSTATUS WINAPI LdrLockLoaderLock( ULONG flags, ULONG *result, ULONG_PTR *magic )
+static NTSTATUS qemu_LdrLockLoaderLock( ULONG flags, ULONG *result, ULONG_PTR *magic )
 {
     if (flags & ~0x2) WINE_FIXME( "flags %x not supported\n", flags );
 
@@ -1277,10 +1271,7 @@ NTSTATUS WINAPI LdrLockLoaderLock( ULONG flags, ULONG *result, ULONG_PTR *magic 
 }
 
 
-/******************************************************************
- *		LdrUnlockLoaderUnlock  (NTDLL.@)
- */
-NTSTATUS WINAPI LdrUnlockLoaderLock( ULONG flags, ULONG_PTR magic )
+static NTSTATUS qemu_LdrUnlockLoaderLock( ULONG flags, ULONG_PTR magic )
 {
     if (magic)
     {
@@ -1292,9 +1283,9 @@ NTSTATUS WINAPI LdrUnlockLoaderLock( ULONG flags, ULONG_PTR magic )
 
 
 /******************************************************************
- *		LdrGetProcedureAddress  (NTDLL.@)
+ *		qemu_LdrGetProcedureAddress  (NTDLL.@)
  */
-NTSTATUS WINAPI LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
+static NTSTATUS WINAPI qemu_LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
                                        ULONG ord, PVOID *address)
 {
     IMAGE_EXPORT_DIRECTORY *exports;
@@ -2113,7 +2104,7 @@ static NTSTATUS qemu_LdrLoadDll(LPCWSTR path_name, DWORD flags,
 /******************************************************************
  *		LdrGetDllHandle (NTDLL.@)
  */
-NTSTATUS WINAPI LdrGetDllHandle( LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base )
+static NTSTATUS qemu_LdrGetDllHandle( LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base )
 {
     NTSTATUS status;
     WCHAR buffer[128];
@@ -2155,7 +2146,7 @@ NTSTATUS WINAPI LdrGetDllHandle( LPCWSTR load_path, ULONG flags, const UNICODE_S
 /******************************************************************
  *		LdrAddRefDll (NTDLL.@)
  */
-NTSTATUS WINAPI LdrAddRefDll( ULONG flags, HMODULE module )
+static NTSTATUS qemu_LdrAddRefDll( ULONG flags, HMODULE module )
 {
     NTSTATUS ret = STATUS_SUCCESS;
     WINE_MODREF *wm;
@@ -2177,60 +2168,6 @@ NTSTATUS WINAPI LdrAddRefDll( ULONG flags, HMODULE module )
     RtlLeaveCriticalSection( &loader_section );
     return ret;
 }
-
-/******************************************************************
- *		LdrQueryProcessModuleInformation
- *
- */
-NTSTATUS WINAPI LdrQueryProcessModuleInformation(PSYSTEM_MODULE_INFORMATION smi, 
-                                                 ULONG buf_size, ULONG* req_size)
-{
-    SYSTEM_MODULE*      sm = &smi->Modules[0];
-    ULONG               size = sizeof(ULONG);
-    NTSTATUS            nts = STATUS_SUCCESS;
-    ANSI_STRING         str;
-    char*               ptr;
-    PLIST_ENTRY         mark, entry;
-    PLDR_MODULE         mod;
-    WORD id = 0;
-
-    smi->ModulesCount = 0;
-
-    RtlEnterCriticalSection( &loader_section );
-    mark = &qemu_getTEB()->Peb->LdrData->InLoadOrderModuleList;
-    for (entry = mark->Flink; entry != mark; entry = entry->Flink)
-    {
-        mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
-        size += sizeof(*sm);
-        if (size <= buf_size)
-        {
-            sm->Reserved1 = 0; /* WINE_FIXME */
-            sm->Reserved2 = 0; /* WINE_FIXME */
-            sm->ImageBaseAddress = mod->BaseAddress;
-            sm->ImageSize = mod->SizeOfImage;
-            sm->Flags = mod->Flags;
-            sm->Id = id++;
-            sm->Rank = 0; /* WINE_FIXME */
-            sm->Unknown = 0; /* WINE_FIXME */
-            str.Length = 0;
-            str.MaximumLength = MAXIMUM_FILENAME_LENGTH;
-            str.Buffer = (char*)sm->Name;
-            RtlUnicodeStringToAnsiString(&str, &mod->FullDllName, FALSE);
-            ptr = strrchr(str.Buffer, '\\');
-            sm->NameOffset = (ptr != NULL) ? (ptr - str.Buffer + 1) : 0;
-
-            smi->ModulesCount++;
-            sm++;
-        }
-        else nts = STATUS_INFO_LENGTH_MISMATCH;
-    }
-    RtlLeaveCriticalSection( &loader_section );
-
-    if (req_size) *req_size = size;
-
-    return nts;
-}
-
 
 static NTSTATUS query_dword_option( HANDLE hkey, LPCWSTR name, ULONG *value )
 {
@@ -2284,7 +2221,7 @@ static NTSTATUS query_string_option( HANDLE hkey, LPCWSTR name, ULONG type,
 /******************************************************************
  *		LdrQueryImageFileExecutionOptions  (NTDLL.@)
  */
-NTSTATUS WINAPI LdrQueryImageFileExecutionOptions( const UNICODE_STRING *key, LPCWSTR value, ULONG type,
+static NTSTATUS qemu_LdrQueryImageFileExecutionOptions( const UNICODE_STRING *key, LPCWSTR value, ULONG type,
                                                    void *data, ULONG in_size, ULONG *out_size )
 {
     static const WCHAR optionsW[] = {'M','a','c','h','i','n','e','\\',
@@ -2368,14 +2305,14 @@ void* WINAPI qemu_LdrResolveDelayLoadedAPI( void* base, const IMAGE_DELAYLOAD_DE
     }
 
     if (IMAGE_SNAP_BY_ORDINAL(pINT[id].u1.Ordinal))
-        nts = LdrGetProcedureAddress(*phmod, NULL, LOWORD(pINT[id].u1.Ordinal), (void**)&fp);
+        nts = qemu_LdrGetProcedureAddress(*phmod, NULL, LOWORD(pINT[id].u1.Ordinal), (void**)&fp);
     else
     {
         const IMAGE_IMPORT_BY_NAME* iibn = get_rva(base, pINT[id].u1.AddressOfData);
         ANSI_STRING fnc;
 
         RtlInitAnsiString(&fnc, (char*)iibn->Name);
-        nts = LdrGetProcedureAddress(*phmod, &fnc, 0, (void**)&fp);
+        nts = qemu_LdrGetProcedureAddress(*phmod, &fnc, 0, (void**)&fp);
     }
     if (!nts)
     {
@@ -2396,6 +2333,7 @@ fail:
     return dllhook(4, &delayinfo);
 }
 
+#if 0
 /******************************************************************
  *		LdrShutdownProcess (NTDLL.@)
  *
@@ -2466,6 +2404,7 @@ void WINAPI LdrShutdownThread(void)
     RtlFreeHeap( GetProcessHeap(), 0, qemu_getTEB()->TlsExpansionSlots );
     RtlLeaveCriticalSection( &loader_section );
 }
+#endif
 
 
 /***********************************************************************
@@ -2600,33 +2539,6 @@ static NTSTATUS qemu_LdrUnloadDll( HMODULE hModule )
 
     return retv;
 }
-
-/***********************************************************************
- *           RtlImageNtHeader   (NTDLL.@)
- */
-PIMAGE_NT_HEADERS WINAPI RtlImageNtHeader(HMODULE hModule)
-{
-    IMAGE_NT_HEADERS *ret;
-
-    __TRY
-    {
-        IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)hModule;
-
-        ret = NULL;
-        if (dos->e_magic == IMAGE_DOS_SIGNATURE)
-        {
-            ret = (IMAGE_NT_HEADERS *)((char *)dos + dos->e_lfanew);
-            if (ret->Signature != IMAGE_NT_SIGNATURE) ret = NULL;
-        }
-    }
-    __EXCEPT_PAGE_FAULT
-    {
-        return NULL;
-    }
-    __ENDTRY
-    return ret;
-}
-
 
 /***********************************************************************
  *           attach_process_dlls
@@ -2812,7 +2724,7 @@ NTSTATUS qemu_LdrInitializeThunk(void)
         peb->ProcessParameters->WindowTitle = wm->ldr.FullDllName;
     version_init( wm->ldr.FullDllName.Buffer );
 
-    LdrQueryImageFileExecutionOptions( &peb->ProcessParameters->ImagePathName, globalflagW,
+    qemu_LdrQueryImageFileExecutionOptions( &peb->ProcessParameters->ImagePathName, globalflagW,
                                        REG_DWORD, &peb->NtGlobalFlag, sizeof(peb->NtGlobalFlag), NULL );
 
     /* the main exe needs to be the first in the load order list */
@@ -2875,14 +2787,14 @@ BOOL qemu_FreeLibrary(HMODULE module)
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
 {
     NTSTATUS status = STATUS_SUCCESS;
-    HMODULE ret;
+    HMODULE ret = NULL;
     ULONG_PTR magic;
     BOOL lock;
 
     /* if we are messing with the refcount, grab the loader lock */
     lock = (flags & GET_MODULE_HANDLE_EX_FLAG_PIN) || !(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT);
     if (lock)
-        LdrLockLoaderLock( 0, NULL, &magic );
+        qemu_LdrLockLoaderLock( 0, NULL, &magic );
 
     if (!name)
     {
@@ -2898,20 +2810,20 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
         UNICODE_STRING wstr;
         RtlInitUnicodeString( &wstr, name );
         /* FIXME: Should not need the path. Init DllPath in PEB properly. */
-        status = LdrGetDllHandle( MODULE_get_dll_load_path(NULL), 0, &wstr, &ret );
+        status = qemu_LdrGetDllHandle( MODULE_get_dll_load_path(NULL), 0, &wstr, &ret );
     }
 
     if (status == STATUS_SUCCESS)
     {
         if (flags & GET_MODULE_HANDLE_EX_FLAG_PIN)
-            LdrAddRefDll( LDR_ADDREF_DLL_PIN, ret );
+            qemu_LdrAddRefDll( LDR_ADDREF_DLL_PIN, ret );
         else if (!(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
-            LdrAddRefDll( 0, ret );
+            qemu_LdrAddRefDll( 0, ret );
     }
     else SetLastError( RtlNtStatusToDosError( status ) );
 
     if (lock)
-        LdrUnlockLoaderLock( 0, magic );
+        qemu_LdrUnlockLoaderLock( 0, magic );
 
     if (status == STATUS_SUCCESS) return ret;
     else return NULL;
@@ -2924,7 +2836,7 @@ DWORD qemu_GetModuleFileName(HMODULE hModule, LPWSTR lpFileName, DWORD size)
     LDR_MODULE *pldr;
     NTSTATUS nts;
 
-    LdrLockLoaderLock( 0, NULL, &magic );
+    qemu_LdrLockLoaderLock( 0, NULL, &magic );
 
     if (!hModule) hModule = qemu_getTEB()->Peb->ImageBaseAddress;
     nts = qemu_LdrFindEntryForAddress( hModule, &pldr );
@@ -2942,7 +2854,7 @@ DWORD qemu_GetModuleFileName(HMODULE hModule, LPWSTR lpFileName, DWORD size)
     }
     else SetLastError( RtlNtStatusToDosError( nts ) );
 
-    LdrUnlockLoaderLock( 0, magic );
+    qemu_LdrUnlockLoaderLock( 0, magic );
 
     WINE_TRACE( "%s\n", wine_dbgstr_wn(lpFileName, len) );
     return len;
@@ -2960,10 +2872,10 @@ const void *qemu_GetProcAddress(HMODULE module, const char *function)
         ANSI_STRING     str;
 
         RtlInitAnsiString( &str, function );
-        nts = LdrGetProcedureAddress( module, &str, 0, (void**)&fp );
+        nts = qemu_LdrGetProcedureAddress( module, &str, 0, (void**)&fp );
     }
     else
-        nts = LdrGetProcedureAddress( module, NULL, LOWORD(function), (void**)&fp );
+        nts = qemu_LdrGetProcedureAddress( module, NULL, LOWORD(function), (void**)&fp );
     if (nts != STATUS_SUCCESS)
     {
         SetLastError( RtlNtStatusToDosError( nts ) );
@@ -3000,14 +2912,14 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
     {
         ULONG_PTR magic;
 
-        LdrLockLoaderLock( 0, NULL, &magic );
-        if (!LdrGetDllHandle( load_path, flags, libname, &hModule ))
+        qemu_LdrLockLoaderLock( 0, NULL, &magic );
+        if (!qemu_LdrGetDllHandle( load_path, flags, libname, &hModule ))
         {
-            LdrAddRefDll( 0, hModule );
-            LdrUnlockLoaderLock( 0, magic );
+            qemu_LdrAddRefDll( 0, hModule );
+            qemu_LdrUnlockLoaderLock( 0, magic );
             goto done;
         }
-        LdrUnlockLoaderLock( 0, magic );
+        qemu_LdrUnlockLoaderLock( 0, magic );
 
         /* The method in load_library_as_datafile allows searching for the
          * 'native' libraries only
