@@ -56,6 +56,7 @@ static const struct qemu_ops ops =
     qemu_set_except_handler,
     qemu_set_call_entry,
     qemu_FindEntryForAddress,
+    qemu_DisableThreadLibraryCalls,
 };
 
 BOOL load_host_dlls(void)
