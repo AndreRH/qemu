@@ -18,32 +18,41 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-
 #include "config.h"
-#include "wine/port.h"
 
-#include <assert.h>
-#include <stdarg.h>
-#include <stdint.h>
-#ifdef HAVE_SYS_MMAN_H
-# include <sys/mman.h>
-#endif
+#include <ntstatus.h>
 
-#include "ntstatus.h"
 #define WIN32_NO_STATUS
 #define NONAMELESSUNION
-#include "windef.h"
-#include "winnt.h"
-#include "winternl.h"
-#include "delayloadhandler.h"
+#include "qemu/osdep.h"
+#include "qemu-version.h"
+
+#include <wine/port.h>
+#include <wine/library.h>
+#include <wine/debug.h>
+#include <wine/unicode.h>
+#include <wine/exception.h>
+#include <winnt.h>
+#include <winternl.h>
+#include <delayloadhandler.h>
+
+#include "qapi/error.h"
+#include "qemu.h"
+#include "qemu/path.h"
+#include "qemu/config-file.h"
+#include "qemu/cutils.h"
+#include "qemu/help_option.h"
+#include "cpu.h"
+#include "exec/exec-all.h"
+#include "tcg.h"
+#include "qemu/timer.h"
+#include "qemu/envlist.h"
+#include "exec/log.h"
+#include "trace/control.h"
+#include "glib-compat.h"
+
 #include "pe.h"
 #include "win_syscall.h"
-
-#include "wine/exception.h"
-#include "wine/library.h"
-#include "wine/unicode.h"
-#include "wine/debug.h"
-#include "ddk/wdm.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(qemu_module);
 
@@ -83,10 +92,6 @@ static LPCSTR debugstr_us( const UNICODE_STRING *us )
 #define DEFAULT_SECURITY_COOKIE_64  (((ULONGLONG)0x00002b99 << 32) | 0x2ddfa232)
 #define DEFAULT_SECURITY_COOKIE_32  0xbb40e64e
 #define DEFAULT_SECURITY_COOKIE_16  (DEFAULT_SECURITY_COOKIE_32 >> 16)
-
-/* we don't want to include winuser.h */
-#define RT_MANIFEST                         ((ULONG_PTR)24)
-#define ISOLATIONAWARE_MANIFEST_RESOURCE_ID ((ULONG_PTR)2)
 
 typedef DWORD (CALLBACK *DLLENTRYPROC)(HMODULE,DWORD,LPVOID);
 typedef void  (CALLBACK *LDRENUMPROC)(LDR_MODULE *, void *, BOOLEAN *);
@@ -609,8 +614,8 @@ static NTSTATUS create_module_activation_context( LDR_MODULE *module )
     LDR_RESOURCE_INFO info;
     const IMAGE_RESOURCE_DATA_ENTRY *entry;
 
-    info.Type = RT_MANIFEST;
-    info.Name = ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
+    info.Type = (ULONG_PTR)RT_MANIFEST;
+    info.Name = (ULONG_PTR)ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
     info.Language = 0;
     if (!(status = LdrFindResource_U( module->BaseAddress, &info, 3, &entry )))
     {
@@ -640,12 +645,9 @@ static BOOL is_dll_native_subsystem( HMODULE module, const IMAGE_NT_HEADERS *nt,
     const IMAGE_IMPORT_DESCRIPTOR *imports;
     DWORD i, size;
     WCHAR buffer[16];
-    SYSTEM_INFO sysinfo;
-
-    GetSystemInfo(&sysinfo);
 
     if (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_NATIVE) return FALSE;
-    if (nt->OptionalHeader.SectionAlignment < sysinfo.dwPageSize) return TRUE;
+    if (nt->OptionalHeader.SectionAlignment < TARGET_PAGE_SIZE) return TRUE;
 
     if ((imports = RtlImageDirectoryEntryToData( module, TRUE,
                                                  IMAGE_DIRECTORY_ENTRY_IMPORT, &size )))
@@ -1436,16 +1438,14 @@ static NTSTATUS perform_relocations( void *module, SIZE_T len )
     const IMAGE_SECTION_HEADER *sec;
     INT_PTR delta;
     ULONG protect_old[96], i;
-    SYSTEM_INFO sysinfo;
 
     nt = RtlImageNtHeader( module );
     base = (char *)nt->OptionalHeader.ImageBase;
 
     assert( module != base );
 
-    GetSystemInfo(&sysinfo);
     /* no relocations are performed on non page-aligned binaries */
-    if (nt->OptionalHeader.SectionAlignment < sysinfo.dwPageSize)
+    if (nt->OptionalHeader.SectionAlignment < TARGET_PAGE_SIZE)
         return STATUS_SUCCESS;
 
     if (!(nt->FileHeader.Characteristics & IMAGE_FILE_DLL) && qemu_getTEB()->Peb->ImageBaseAddress)
