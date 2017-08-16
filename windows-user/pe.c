@@ -2932,7 +2932,6 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
 
     RtlInitUnicodeString(&us, name);
     nts = qemu_LdrLoadDll( load_path, flags, &us, &hModule );
-    RtlFreeUnicodeString(&us);
     if (nts != STATUS_SUCCESS)
     {
         hModule = 0;
