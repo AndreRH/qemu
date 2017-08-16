@@ -725,6 +725,8 @@ static BOOL build_command_line(char **argv)
 
 static void init_process_params(char **argv, const char *filenme)
 {
+    WCHAR *cwd;
+    DWORD size;
     static const WCHAR qemu_x86_64exeW[] = {'q','e','m','u','-','x','8','6','_','6','4','.','e','x','e', 0};
 
     /* FIXME: Wine allocates the string buffer right behind the process parameter structure. */
@@ -744,6 +746,18 @@ static void init_process_params(char **argv, const char *filenme)
     {
         guest_PEB.ProcessParameters->WindowTitle = NtCurrentTeb()->Peb->ProcessParameters->WindowTitle;
     }
+
+    /* The effect of this code is to inject the current working directory into the top of the DLL search
+     * path. It will later be replaced by the directory where the .exe was loaded from. The \\qemu-x86_64.exe.so
+     * part will be cut off by the loader. */
+    size = GetCurrentDirectoryW(0, NULL);
+    cwd = my_alloc((size + 16) * sizeof(*cwd));
+    GetCurrentDirectoryW(size, cwd);
+    cwd[size - 1] = '\\';
+    cwd[size] = 0;
+    strcatW(cwd, qemu_x86_64exeW);
+    fprintf(stderr, "Cwd %s\n", wine_dbgstr_w(cwd));
+    RtlInitUnicodeString(&guest_PEB.ProcessParameters->ImagePathName, cwd);
 
     guest_ldr.Length = sizeof(guest_ldr);
     guest_ldr.Initialized = TRUE;
