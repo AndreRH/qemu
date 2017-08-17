@@ -2784,8 +2784,6 @@ BOOL qemu_FreeLibrary(HMODULE module)
 
     if ((ULONG_PTR)module & 1)
     {
-        WINE_ERR("Did not expect to end up here\n");
-        ExitProcess(1);
         /* this is a LOAD_LIBRARY_AS_DATAFILE module */
         char *ptr = (char *)module - 1;
         return UnmapViewOfFile( ptr );
@@ -2897,12 +2895,48 @@ const void *qemu_GetProcAddress(HMODULE module, const char *function)
     return fp;
 }
 
-HMODULE qemu_LoadLibrary(const WCHAR *name)
+static BOOL load_library_as_datafile( LPCWSTR name, HMODULE* hmod)
+{
+    static const WCHAR dotDLL[] = {'.','d','l','l',0};
+
+    WCHAR filenameW[MAX_PATH];
+    HANDLE hFile = INVALID_HANDLE_VALUE;
+    HANDLE mapping;
+    HMODULE module;
+
+    *hmod = 0;
+
+    if (SearchPathW( NULL, name, dotDLL, sizeof(filenameW) / sizeof(filenameW[0]),
+                     filenameW, NULL ))
+    {
+        hFile = CreateFileW( filenameW, GENERIC_READ, FILE_SHARE_READ,
+                             NULL, OPEN_EXISTING, 0, 0 );
+    }
+    if (hFile == INVALID_HANDLE_VALUE) return FALSE;
+
+    mapping = CreateFileMappingW( hFile, NULL, PAGE_READONLY, 0, 0, NULL );
+    CloseHandle( hFile );
+    if (!mapping) return FALSE;
+
+    module = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, 0 );
+    CloseHandle( mapping );
+    if (!module) return FALSE;
+
+    /* make sure it's a valid PE file */
+    if (!RtlImageNtHeader(module))
+    {
+        UnmapViewOfFile( module );
+        return FALSE;
+    }
+    *hmod = (HMODULE)((char *)module + 1);  /* set low bit of handle to indicate datafile module */
+    return TRUE;
+}
+
+HMODULE qemu_LoadLibrary(const WCHAR *name, DWORD flags)
 {
     NTSTATUS nts;
     HMODULE hModule;
     WCHAR *load_path;
-    DWORD flags = 0;
     UNICODE_STRING wstr;
     static const DWORD unsupported_flags = 
         LOAD_IGNORE_CODE_AUTHZ_LEVEL |
@@ -2918,15 +2952,21 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
     if( flags & unsupported_flags)
         WINE_FIXME("unsupported flag(s) used (flags: 0x%08x)\n", flags);
 
+    if (!name)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
     load_path = MODULE_get_dll_load_path( flags & LOAD_WITH_ALTERED_SEARCH_PATH ? name : NULL );
 
-#if 0
     if (flags & LOAD_LIBRARY_AS_DATAFILE)
     {
         ULONG_PTR magic;
 
         qemu_LdrLockLoaderLock( 0, NULL, &magic );
-        if (!qemu_LdrGetDllHandle( load_path, flags, libname, &hModule ))
+        RtlInitUnicodeString(&wstr, name);
+        if (!qemu_LdrGetDllHandle( load_path, flags, &wstr, &hModule ))
         {
             qemu_LdrAddRefDll( 0, hModule );
             qemu_LdrUnlockLoaderLock( 0, magic );
@@ -2937,11 +2977,10 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
         /* The method in load_library_as_datafile allows searching for the
          * 'native' libraries only
          */
-        if (load_library_as_datafile( libname->Buffer, &hModule )) goto done;
+        if (load_library_as_datafile( name, &hModule )) goto done;
         flags |= DONT_RESOLVE_DLL_REFERENCES; /* Just in case */
         /* Fallback to normal behaviour */
     }
-#endif
 
     RtlInitUnicodeString(&wstr, name);
     if (wstr.Buffer[wstr.Length/sizeof(WCHAR) - 1] != ' ')
@@ -2970,6 +3009,7 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
             SetLastError( RtlNtStatusToDosError( nts ) );
     }
 
+done:
     HeapFree(GetProcessHeap(), 0, load_path);
     return hModule;
 }
