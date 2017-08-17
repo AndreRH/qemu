@@ -2999,3 +2999,23 @@ BOOL qemu_DisableThreadLibraryCalls(HMODULE mod)
     NTSTATUS status = qemu_LdrDisableThreadCalloutsForDll(mod);
     return status == STATUS_SUCCESS;
 }
+
+BOOL qemu_get_ldr_module(HANDLE process, HMODULE mod, void **ldr)
+{
+    WINE_MODREF *wm;
+
+    *ldr = NULL;
+
+    /* Copypasting the code from Wine should generally work, except that we need a
+     * way to identify qemu processes and return the guest PIB. */
+    if (process && process != GetCurrentProcess())
+    {
+        WINE_FIXME("Not supported for other processes yet.\n");
+        return FALSE;
+    }
+    wm = get_modref(mod);
+    if (!wm)
+        return FALSE;
+    *ldr = &wm->ldr;
+    return TRUE;
+}
