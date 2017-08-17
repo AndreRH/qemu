@@ -2903,7 +2903,7 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
     HMODULE hModule;
     WCHAR *load_path;
     DWORD flags = 0;
-    UNICODE_STRING us;
+    UNICODE_STRING wstr;
     static const DWORD unsupported_flags = 
         LOAD_IGNORE_CODE_AUTHZ_LEVEL |
         LOAD_LIBRARY_AS_IMAGE_RESOURCE |
@@ -2943,8 +2943,24 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
     }
 #endif
 
-    RtlInitUnicodeString(&us, name);
-    nts = qemu_LdrLoadDll( load_path, flags, &us, &hModule );
+    RtlInitUnicodeString(&wstr, name);
+    if (wstr.Buffer[wstr.Length/sizeof(WCHAR) - 1] != ' ')
+    {
+        nts = qemu_LdrLoadDll(load_path, flags, &wstr, &hModule);
+    }
+    else
+    {
+        /* Library name has trailing spaces */
+        RtlCreateUnicodeString(&wstr, name);
+        while (wstr.Length > sizeof(WCHAR) &&
+            wstr.Buffer[wstr.Length/sizeof(WCHAR) - 1] == ' ')
+        {
+            wstr.Length -= sizeof(WCHAR);
+        }
+        wstr.Buffer[wstr.Length/sizeof(WCHAR)] = '\0';
+        nts = qemu_LdrLoadDll(load_path, flags, &wstr, &hModule);
+        RtlFreeUnicodeString(&wstr);
+    }
     if (nts != STATUS_SUCCESS)
     {
         hModule = 0;
@@ -2954,8 +2970,9 @@ HMODULE qemu_LoadLibrary(const WCHAR *name)
             SetLastError( RtlNtStatusToDosError( nts ) );
     }
 
-    HeapFree( GetProcessHeap(), 0, load_path );
-    return hModule;}
+    HeapFree(GetProcessHeap(), 0, load_path);
+    return hModule;
+}
 
 BOOL qemu_FindEntryForAddress(void *addr, HMODULE *mod)
 {
