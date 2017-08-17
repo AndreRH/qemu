@@ -160,6 +160,9 @@ static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
     while (len--) *dst++ = (unsigned char)*src++;
 }
 
+static size_t page_mask = TARGET_PAGE_SIZE - 1;
+
+#define ROUND_SIZE(size)  (((size) + page_mask) & ~page_mask)
 
 /*************************************************************************
  *		call_dll_entry_point
@@ -1551,7 +1554,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
                 goto error;
             }
             image_base = (void *)(DWORD_PTR)nt.opt.hdr32.ImageBase;
-            image_size = nt.opt.hdr32.SizeOfImage;
+            image_size = ROUND_SIZE(nt.opt.hdr32.SizeOfImage);
             header_size = nt.opt.hdr32.SizeOfHeaders;
             fixed_header_size += sizeof(nt.opt.hdr32);
             break;
@@ -1563,7 +1566,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
                 goto error;
             }
             image_base = (void *)nt.opt.hdr64.ImageBase;
-            image_size = nt.opt.hdr64.SizeOfImage;
+            image_size = ROUND_SIZE(nt.opt.hdr64.SizeOfImage);
             header_size = nt.opt.hdr64.SizeOfHeaders;
             fixed_header_size += sizeof(nt.opt.hdr64);
             break;
