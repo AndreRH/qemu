@@ -35,7 +35,7 @@ struct qemu_ops
     HMODULE (*qemu_GetModuleHandleEx)(DWORD flags, const WCHAR *name);
     const void *(*qemu_GetProcAddress)(HMODULE module, const char *name);
     void *(*qemu_getTEB)(void);
-    HMODULE (*qemu_LoadLibrary)(const WCHAR *name);
+    HMODULE (*qemu_LoadLibrary)(const WCHAR *name, DWORD flags);
     void (*qemu_set_except_handler)(uint64_t handler);
     void (*qemu_set_call_entry)(uint64_t call_entry);
     BOOL (*qemu_FindEntryForAddress)(void *addr, HMODULE *mod);

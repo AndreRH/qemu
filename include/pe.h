@@ -3,7 +3,7 @@
 
 #define DEFAULT_STACK_SIZE 1024 * 1024
 
-HMODULE qemu_LoadLibrary(const WCHAR *name);
+HMODULE qemu_LoadLibrary(const WCHAR *name, DWORD flags);
 DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size);
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name);
 const void *qemu_GetProcAddress(HMODULE module, const char *name);
