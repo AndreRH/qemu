@@ -1503,13 +1503,14 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
     struct nt_header nt;
     BOOL ret;
     DWORD read;
-    SIZE_T image_size, header_size;
+    SIZE_T image_size, header_size, section_align;
     void *image_base;
     SIZE_T fixed_header_size;
     unsigned int i;
     void *base = NULL, *alloc;
     const IMAGE_SECTION_HEADER *section;
     NTSTATUS status = STATUS_DLL_NOT_FOUND;
+    DWORD protect, old_protect;
 
     SetFilePointer(file, 0, NULL, FILE_BEGIN);
     ret = ReadFile(file, &dos, sizeof(dos), &read, NULL);
@@ -1556,6 +1557,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
             image_base = (void *)(DWORD_PTR)nt.opt.hdr32.ImageBase;
             image_size = ROUND_SIZE(nt.opt.hdr32.SizeOfImage);
             header_size = nt.opt.hdr32.SizeOfHeaders;
+            section_align = nt.opt.hdr32.SectionAlignment;
             fixed_header_size += sizeof(nt.opt.hdr32);
             break;
         case IMAGE_FILE_MACHINE_AMD64:
@@ -1568,6 +1570,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
             image_base = (void *)nt.opt.hdr64.ImageBase;
             image_size = ROUND_SIZE(nt.opt.hdr64.SizeOfImage);
             header_size = nt.opt.hdr64.SizeOfHeaders;
+            section_align = nt.opt.hdr64.SectionAlignment;
             fixed_header_size += sizeof(nt.opt.hdr64);
             break;
         default:
@@ -1606,7 +1609,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
         }
     }
 
-    alloc = VirtualAlloc(base, header_size, MEM_COMMIT, PAGE_READWRITE);
+    alloc = VirtualAlloc(base, header_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     if (!alloc)
     {
         WINE_ERR("Failed to commit memory for image headers.\n");
@@ -1621,7 +1624,8 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
         status = STATUS_INVALID_FILE_FOR_SECTION; /* Not sure */
         goto error;
     }
-    /* TODO: Write-protect the headers. */
+    if (section_align >= TARGET_PAGE_SIZE)
+        VirtualProtect(base, header_size, PAGE_READONLY, &old_protect);
 
     section = (const IMAGE_SECTION_HEADER *)((char *)base + fixed_header_size);
     WINE_TRACE("Got %u sections at %p\n", nt.FileHeader.NumberOfSections, section);
@@ -1631,7 +1635,6 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
         void *location = get_rva(base, section[i].VirtualAddress);
         SIZE_T map_size = section[i].Misc.VirtualSize;
         WINE_TRACE("Mapping section %8s at %p.\n", section[i].Name, location);
-        DWORD protect, old_protect;
 
         alloc = VirtualAlloc(location, map_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
         if (!alloc)
