@@ -826,7 +826,7 @@ int main(int argc, char **argv, char **envp)
     i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
     filenameW = my_alloc(i * sizeof(*filenameW));
     MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, i);
-    exe_module = qemu_LoadLibrary(filenameW);
+    exe_module = qemu_LoadLibrary(filenameW, 0);
     my_free(filenameW);
     if (!exe_module)
     {
