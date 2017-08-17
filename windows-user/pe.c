@@ -1506,17 +1506,20 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
     unsigned int i;
     void *base = NULL, *alloc;
     const IMAGE_SECTION_HEADER *section;
+    NTSTATUS status = STATUS_DLL_NOT_FOUND;
 
     SetFilePointer(file, 0, NULL, FILE_BEGIN);
     ret = ReadFile(file, &dos, sizeof(dos), &read, NULL);
     if (!ret || read != sizeof(dos))
     {
         WINE_ERR("Failed to read DOS header.\n");
+        status = STATUS_INVALID_IMAGE_NOT_MZ;
         goto error;
     }
     if (dos.e_magic != IMAGE_DOS_SIGNATURE)
     {
         WINE_ERR("Invalid DOS signature.\n");
+        status = STATUS_INVALID_IMAGE_NOT_MZ;
         goto error;
     }
 
@@ -1525,11 +1528,14 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
     if (!ret || read != sizeof(nt))
     {
         WINE_ERR("Failed to read PE header.\n");
+        status = STATUS_INVALID_IMAGE_FORMAT;
         goto error;
     }
     if (nt.Signature != IMAGE_NT_SIGNATURE)
     {
         WINE_ERR("Invalid NT signature.\n");
+        if (nt.Signature == IMAGE_OS2_SIGNATURE) status = STATUS_INVALID_IMAGE_NE_FORMAT;
+        status = STATUS_INVALID_IMAGE_PROTECT;
         goto error;
     }
 
@@ -1541,6 +1547,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
             if (nt.opt.hdr64.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC)
             {
                 WINE_ERR("Wrong optional header magic.\n");
+                status = STATUS_INVALID_IMAGE_FORMAT;
                 goto error;
             }
             image_base = (void *)(DWORD_PTR)nt.opt.hdr32.ImageBase;
@@ -1552,6 +1559,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
             if (nt.opt.hdr64.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
             {
                 WINE_ERR("Wrong optional header magic.\n");
+                status = STATUS_INVALID_IMAGE_FORMAT;
                 goto error;
             }
             image_base = (void *)nt.opt.hdr64.ImageBase;
@@ -1561,6 +1569,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
             break;
         default:
             WINE_ERR("Unsupported machine %d.\n", nt.FileHeader.Machine);
+            status = STATUS_INVALID_IMAGE_FORMAT;
             goto error;
     }
 
@@ -1589,6 +1598,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
         if (!base)
         {
             WINE_ERR("Failed to reserve address space for image!\n");
+            status = STATUS_SECTION_TOO_BIG; /* Not sure */
             goto error;
         }
     }
@@ -1597,6 +1607,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
     if (!alloc)
     {
         WINE_ERR("Failed to commit memory for image headers.\n");
+        status = STATUS_SECTION_TOO_BIG; /* Not sure */
         goto error;
     }
     SetFilePointer(file, 0, NULL, FILE_BEGIN);
@@ -1604,6 +1615,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
     if (!ret || read != header_size)
     {
         WINE_ERR("Failed to read image headers.\n");
+        status = STATUS_INVALID_FILE_FOR_SECTION; /* Not sure */
         goto error;
     }
     /* TODO: Write-protect the headers. */
@@ -1622,6 +1634,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
         if (!alloc)
         {
             WINE_ERR("Failed to commit memory for section %8s.\n", section[i].Name);
+            status = STATUS_SECTION_TOO_BIG; /* Not sure */
             goto error;
         }
 
@@ -1635,6 +1648,7 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
             if (!ret || read != section[i].SizeOfRawData)
             {
                 WINE_ERR("Failed to read section %8s.\n", section[i].Name);
+                status = STATUS_INVALID_FILE_FOR_SECTION; /* Not sure */
                 goto error;
             }
         }
@@ -1692,7 +1706,7 @@ error:
     if (base)
         VirtualFree(base, 0, MEM_RELEASE);
 
-    return STATUS_DLL_NOT_FOUND;
+    return status;
 }
 
 /******************************************************************************
