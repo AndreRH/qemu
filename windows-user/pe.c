@@ -2795,6 +2795,18 @@ BOOL qemu_FreeLibrary(HMODULE module)
     return retv;
 }
 
+void *qemu_RtlPcToFileHeader(void *pc, void **address)
+{
+    LDR_MODULE *module;
+    PVOID ret = NULL;
+
+    RtlEnterCriticalSection( &loader_section );
+    if (!qemu_LdrFindEntryForAddress( pc, &module )) ret = module->BaseAddress;
+    RtlLeaveCriticalSection( &loader_section );
+    *address = ret;
+    return ret;
+}
+
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name)
 {
     NTSTATUS status = STATUS_SUCCESS;
