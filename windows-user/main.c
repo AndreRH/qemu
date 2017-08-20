@@ -247,6 +247,8 @@ static void init_thread_cpu(void)
     guest_teb->Tib.StackBase = (void *)(h2g(stack) + image.stack_reserve);
     guest_teb->Tib.StackLimit = (void *)h2g(stack);
 
+    qemu_loader_thread_init();
+
     /* FIXME: Figure out how to free the CPU, stack, TEB and IDT on thread exit. */
     thread_cpu = cpu;
 }

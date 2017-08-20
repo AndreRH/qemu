@@ -723,7 +723,7 @@ static SHORT alloc_tls_slot( LDR_MODULE *mod )
             if (old) memcpy( new, old, tls_module_count * sizeof(*new) );
             teb->ThreadLocalStoragePointer = new;
             WINE_TRACE( "thread %04lx tls block %p -> %p\n", (ULONG_PTR)teb->ClientId.UniqueThread, old, new );
-            /* WINE_FIXME: can't free old block here, should be freed at thread exit */
+            /* FIXME: can't free old block here, should be freed at thread exit */
         }
 
         tls_dirs = new_ptr;
@@ -2769,6 +2769,14 @@ error:
     WINE_ERR( "Main exe initialization for %s failed, status %x\n",
          wine_dbgstr_w(peb->ProcessParameters->ImagePathName.Buffer), status );
     return status;
+}
+
+void qemu_loader_thread_init(void)
+{
+    TEB *teb = qemu_getTEB();
+    RtlAcquirePebLock();
+    InsertHeadList(&tls_links, &teb->TlsLinks);
+    RtlReleasePebLock();
 }
 
 BOOL qemu_FreeLibrary(HMODULE module)
