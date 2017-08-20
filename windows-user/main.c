@@ -410,6 +410,7 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
         rcu_register_thread();
         init_thread_cpu();
         cs = thread_cpu;
+        MODULE_DllThreadAttach(NULL);
     }
     env = cs->env_ptr;
 

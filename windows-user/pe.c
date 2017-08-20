@@ -1149,10 +1149,6 @@ NTSTATUS MODULE_DllThreadAttach( LPVOID lpReserved )
 
     RtlEnterCriticalSection( &loader_section );
 
-    RtlAcquirePebLock();
-    InsertHeadList( &tls_links, &qemu_getTEB()->TlsLinks );
-    RtlReleasePebLock();
-
     if ((status = alloc_thread_tls()) != STATUS_SUCCESS) goto done;
 
     mark = &qemu_getTEB()->Peb->LdrData->InInitializationOrderModuleList;
