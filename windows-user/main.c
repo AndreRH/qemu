@@ -881,3 +881,9 @@ int main(int argc, char **argv, char **envp)
     fprintf(stderr, "Main function returned, result %u.\n", ret);
     return ret;
 }
+
+BOOL qemu_DllMain(DWORD reason, void *reserved)
+{
+    fprintf(stderr, "qemu DllMain(%u).\n", reason);
+    return TRUE;
+}
