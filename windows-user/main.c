@@ -328,6 +328,7 @@ static void cpu_loop(const void *code)
         cpu_exec_start(cs);
         trapnr = cpu_exec(cs);
         cpu_exec_end(cs);
+        process_queued_cpu_work(cs);
 
         switch (trapnr)
         {
@@ -364,6 +365,9 @@ static void cpu_loop(const void *code)
                 env->regs[R_ECX] = h2g(&except);
                 env->eip = guest_exception_handler;
                 continue;
+
+            case EXCP_INTERRUPT:
+                break;
 
             default:
                 fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
