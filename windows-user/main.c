@@ -884,6 +884,13 @@ int main(int argc, char **argv, char **envp)
 
 BOOL qemu_DllMain(DWORD reason, void *reserved)
 {
-    fprintf(stderr, "qemu DllMain(%u).\n", reason);
+    qemu_log("qemu DllMain(%u).\n", reason);
+
+    if (reason == DLL_THREAD_DETACH && thread_cpu)
+    {
+        qemu_log("Informing rcu about disappearing thread.\n");
+        rcu_unregister_thread();
+    }
+
     return TRUE;
 }
