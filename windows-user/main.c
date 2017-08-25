@@ -372,7 +372,7 @@ static void cpu_loop(const void *code)
             default:
                 fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
                 cpu_dump_state(cs, stderr, fprintf, 0);
-                return;
+                ExitProcess(255);
         }
     }
 }
