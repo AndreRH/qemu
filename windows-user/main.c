@@ -390,6 +390,12 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
     uint64_t backup_eip, retval;
     target_ulong backup_regs[CPU_NB_REGS];
 
+    if (!code)
+    {
+        fprintf(stderr, "Attempting to execute NULL.\n");
+        ExitProcess(1);
+    }
+
     /* The basic idea of this function is to back up all registers, write the function argument
      * into rcx, reserve stack space on the guest stack as the Win64 calling convention mandates
      * and call the emulated CPU to execute the requested code.
@@ -429,6 +435,13 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
 
     qemu_log("Going to call guest code %p.\n", code);
     cpu_loop(code);
+
+    if (backup_regs[R_ESP] - 0x20 != env->regs[R_ESP])
+    {
+        fprintf(stderr, "Stack pointer is 0x%lx, expected 0x%lx, longjump or unwind going on?\n",
+                backup_regs[R_ESP] - 0x20, env->regs[R_ESP]);
+        ExitProcess(1);
+    }
 
     retval = env->regs[R_EAX];
     memcpy(env->regs, backup_regs, sizeof(backup_regs));
