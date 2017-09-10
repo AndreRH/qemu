@@ -151,6 +151,7 @@ static void init_thread_cpu(void)
     CPUX86State *env;
     void *stack;
     CPUState *cpu;
+    DWORD stack_reserve = image.stack_reserve ? image.stack_reserve : DEFAULT_STACK_SIZE;
 
     guest_teb = alloc_teb();
 
@@ -187,14 +188,14 @@ static void init_thread_cpu(void)
      *
      * Afaics when the reserved area is exhausted an exception is triggered and Windows does
      * not try to reserve more. Is this correct? */
-    stack = VirtualAlloc(NULL, image.stack_reserve ? image.stack_reserve : DEFAULT_STACK_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    stack = VirtualAlloc(NULL, stack_reserve, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (!stack)
     {
-        fprintf(stderr, "Could not reserve stack space size %u.\n", image.stack_reserve);
+        fprintf(stderr, "Could not reserve stack space size %u.\n", stack_reserve);
         ExitProcess(EXIT_FAILURE);
     }
     /* Stack grows down, so point to the end of the allocation. */
-    env->regs[R_ESP] = h2g(stack) + image.stack_reserve;
+    env->regs[R_ESP] = h2g(stack) + stack_reserve;
 
     env->idt.limit = 511;
     idt_table = my_alloc(sizeof(uint64_t) * (env->idt.limit + 1));
@@ -244,7 +245,7 @@ static void init_thread_cpu(void)
     cpu_x86_load_seg(env, R_GS, 0);
     env->segs[R_GS].base = h2g(guest_teb);
 
-    guest_teb->Tib.StackBase = (void *)(h2g(stack) + image.stack_reserve);
+    guest_teb->Tib.StackBase = (void *)(h2g(stack) + stack_reserve);
     guest_teb->Tib.StackLimit = (void *)h2g(stack);
 
     qemu_loader_thread_init();
