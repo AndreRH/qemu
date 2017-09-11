@@ -1878,6 +1878,21 @@ done:
     return status;
 }
 
+static WCHAR *get_guest_dll_path(void)
+{
+    static WCHAR *cached_path;
+    static const WCHAR qemu_guest_dll[] = {'\\','q', 'e', 'm', 'u', '_', 'g', 'u', 'e', 's', 't', '_', 'd', 'l', 'l', '\\', 0};
+
+    if (cached_path)
+        return cached_path;
+
+    cached_path = HeapAlloc(GetProcessHeap(), 0, (MAX_PATH + 10) * sizeof(*cached_path));
+    GetModuleFileNameW(NULL, cached_path, MAX_PATH);
+    pPathRemoveFileSpecW(cached_path);
+    lstrcatW(cached_path, qemu_guest_dll);
+
+    return cached_path;
+}
 
 /***********************************************************************
  *	find_dll_file
@@ -1890,8 +1905,9 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
     UNICODE_STRING nt_name;
-    WCHAR *file_part, *ext, *dllname;
-    ULONG len;
+    WCHAR *file_part, *ext, *dllname, *sysdir, *qemu_sysdir = get_guest_dll_path();
+    ULONG len, sysdirlen;
+    BOOLEAN convert;
 
     /* first append .dll if needed */
 
@@ -1905,6 +1921,10 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
         strcatW( dllname, dllW );
         libname = dllname;
     }
+
+    sysdirlen = GetSystemDirectoryW( NULL, 0 );
+    sysdir = my_alloc(sizeof(*sysdir) * sysdirlen);
+    GetSystemDirectoryW(sysdir, sysdirlen);
 
     nt_name.Buffer = NULL;
 
@@ -1933,14 +1953,40 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
     {
         /* we need to search for it */
         len = RtlDosSearchPath_U( load_path, libname, NULL, *size, filename, &file_part );
+        /* If we haven't found it yet, try to search in qemu's DLL directory. There may be libs in there
+         * that are not in system32, e.g. libwine.dll. Don't bother to fake the directory of those files
+         * as they should only be internal files and not directly accessed by the app. */
+        if (!len)
+            len = RtlDosSearchPath_U( qemu_sysdir, libname, NULL, *size, filename, &file_part );
+
         if (len)
         {
             if (len >= *size) goto overflow;
             if ((*pwm = find_fullname_module( filename )) || !handle) goto found;
 
-            if (!RtlDosPathNameToNtPathName_U( filename, &nt_name, NULL, NULL ))
+            /* Load anything that is placed in system32 from qemu's guest DLL dir instead, but
+             * pretend that the file is from system32. */
+            if (!strncmpiW(filename, sysdir, sysdirlen - 1))
+            {
+                WCHAR *filename2;
+
+                len = strlenW(qemu_sysdir) + strlenW(filename) + 1;
+                filename2 = my_alloc(len * sizeof(*filename2));
+                strcpyW(filename2, qemu_sysdir);
+                strcatW(filename2, filename + sysdirlen);
+
+                convert = RtlDosPathNameToNtPathName_U( filename2, &nt_name, NULL, NULL );
+                my_free(filename2);
+            }
+            else
+            {
+                convert = RtlDosPathNameToNtPathName_U( filename, &nt_name, NULL, NULL );
+            }
+
+            if (!convert)
             {
                 RtlFreeHeap( GetProcessHeap(), 0, dllname );
+                my_free(sysdir);
                 return STATUS_NO_MEMORY;
             }
             attr.Length = sizeof(attr);
@@ -1968,9 +2014,32 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
 
     /* absolute path name, or relative path name but not found above */
 
-    if (!RtlDosPathNameToNtPathName_U( libname, &nt_name, &file_part, NULL ))
+    /* Load anything that is placed in system32 from qemu's guest DLL dir instead, but
+     *  pretend that the file is from system32. */
+    if (!strncmpiW(libname, sysdir, sysdirlen - 1))
+    {
+        WCHAR *filename2;
+
+        len = strlenW(qemu_sysdir) + strlenW(libname) + 1;
+        filename2 = my_alloc(len * sizeof(*filename2));
+        strcpyW(filename2, qemu_sysdir);
+        strcatW(filename2, libname + sysdirlen);
+
+        WINE_TRACE("Loading %s instead of %s\n", wine_dbgstr_w(filename2), wine_dbgstr_w(libname));
+
+        /* FIXME: File_part? We'll probably only get here if the original path was absolute anyway. */
+        convert = RtlDosPathNameToNtPathName_U( filename2, &nt_name, &file_part, NULL );
+        my_free(filename2);
+    }
+    else
+    {
+        convert = RtlDosPathNameToNtPathName_U( libname, &nt_name, &file_part, NULL );
+    }
+
+    if (!convert)
     {
         RtlFreeHeap( GetProcessHeap(), 0, dllname );
+        my_free(sysdir);
         return STATUS_NO_MEMORY;
     }
     len = nt_name.Length - 4*sizeof(WCHAR);  /* for \??\ prefix */
@@ -1989,12 +2058,14 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
 found:
     RtlFreeUnicodeString( &nt_name );
     RtlFreeHeap( GetProcessHeap(), 0, dllname );
+    my_free(sysdir);
     return STATUS_SUCCESS;
 
 overflow:
     RtlFreeUnicodeString( &nt_name );
     RtlFreeHeap( GetProcessHeap(), 0, dllname );
     *size = len + sizeof(WCHAR);
+    my_free(sysdir);
     return STATUS_BUFFER_TOO_SMALL;
 }
 
@@ -2604,16 +2675,28 @@ static void version_init( const WCHAR *appname )
 static const WCHAR *get_dll_system_path(void)
 {
     static WCHAR *cached_path;
-    static const WCHAR qemu_guest_dll[] = {'\\','q', 'e', 'm', 'u', '_', 'g', 'u', 'e', 's', 't', '_', 'd', 'l', 'l', '\\', 0};
 
-    if (cached_path)
-        return cached_path;
+    if (!cached_path)
+    {
+        WCHAR *p, *path;
+        int len = 1;
 
-    cached_path = HeapAlloc(GetProcessHeap(), 0, (MAX_PATH + 10) * sizeof(*cached_path));
-    GetModuleFileNameW(NULL, cached_path, MAX_PATH);
-    pPathRemoveFileSpecW(cached_path);
-    lstrcatW(cached_path, qemu_guest_dll);
-
+        len += 2 * GetSystemDirectoryW( NULL, 0 );
+        len += GetWindowsDirectoryW( NULL, 0 );
+        p = path = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        GetSystemDirectoryW( p, path + len - p);
+        p += strlenW(p);
+        /* if system directory ends in "32" add 16-bit version too */
+        if (p[-2] == '3' && p[-1] == '2')
+        {
+            *p++ = ';';
+            GetSystemDirectoryW( p, path + len - p);
+            p += strlenW(p) - 2;
+        }
+        *p++ = ';';
+        GetWindowsDirectoryW( p, path + len - p);
+        cached_path = path;
+    }
     return cached_path;
 }
 
