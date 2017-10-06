@@ -858,6 +858,17 @@ static void block_address_space(void)
         } while(map);
         size >>= 1;
     }
+
+    /* Same for Wine's heap. */
+    size = 1UL << 63UL;
+    while(size)
+    {
+        do
+        {
+            map = my_alloc(size);
+        } while(map);
+        size >>= 1;
+    }
 }
 
 int main(int argc, char **argv, char **envp)
