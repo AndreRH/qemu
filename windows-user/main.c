@@ -123,6 +123,12 @@ static void set_idt(int n, unsigned int dpl)
     set_gate64(idt_table + n * 2, 0, dpl, 0, 0);
 }
 
+static void free_teb(TEB *teb)
+{
+    VirtualFree(teb->Tib.StackLimit, 0, MEM_RELEASE);
+    VirtualFree(teb, 0, MEM_RELEASE);
+}
+
 static TEB *alloc_teb(void)
 {
     TEB *ret;
@@ -150,12 +156,13 @@ static void init_thread_cpu(void)
 {
     CPUX86State *env;
     void *stack;
-    CPUState *cpu;
+    CPUState *cpu = thread_cpu;
     DWORD stack_reserve = image.stack_reserve ? image.stack_reserve : DEFAULT_STACK_SIZE;
 
     guest_teb = alloc_teb();
 
-    cpu = cpu_create(X86_CPU_TYPE_NAME("qemu64"));
+    if (!cpu)
+        cpu = cpu_create(X86_CPU_TYPE_NAME("qemu64"));
     if (!cpu)
     {
         fprintf(stderr, "Unable to find CPU definition\n");
@@ -170,15 +177,18 @@ static void init_thread_cpu(void)
         env->cr[4] |= CR4_OSFXSR_MASK;
         env->hflags |= HF_OSFXSR_MASK;
     }
-    /* enable 64 bit mode if possible */
-    if (!(env->features[FEAT_8000_0001_EDX] & CPUID_EXT2_LM))
+    if (!is_32_bit)
     {
-        fprintf(stderr, "The selected x86 CPU does not support 64 bit mode\n");
-        ExitProcess(EXIT_FAILURE);
+        /* enable 64 bit mode if possible */
+        if (!(env->features[FEAT_8000_0001_EDX] & CPUID_EXT2_LM))
+        {
+            fprintf(stderr, "The selected x86 CPU does not support 64 bit mode\n");
+            ExitProcess(EXIT_FAILURE);
+        }
+        env->cr[4] |= CR4_PAE_MASK;
+        env->efer |= MSR_EFER_LMA | MSR_EFER_LME;
+        env->hflags |= HF_LMA_MASK;
     }
-    env->cr[4] |= CR4_PAE_MASK;
-    env->efer |= MSR_EFER_LMA | MSR_EFER_LME;
-    env->hflags |= HF_LMA_MASK;
     /* flags setup : we activate the IRQs by default as in user mode */
     env->eflags |= IF_MASK;
 
@@ -197,7 +207,7 @@ static void init_thread_cpu(void)
     /* Stack grows down, so point to the end of the allocation. */
     env->regs[R_ESP] = h2g(stack) + stack_reserve;
 
-    env->idt.limit = 511;
+    env->idt.limit = is_32_bit ? 255 : 511;
     idt_table = my_alloc(sizeof(uint64_t) * (env->idt.limit + 1));
     env->idt.base = h2g(idt_table);
     set_idt(0, 0);
@@ -228,21 +238,42 @@ static void init_thread_cpu(void)
         env->gdt.base = h2g(my_alloc(sizeof(uint64_t) * TARGET_GDT_ENTRIES));
         env->gdt.limit = sizeof(uint64_t) * TARGET_GDT_ENTRIES - 1;
         gdt_table = g2h(env->gdt.base);
-        /* 64 bit code segment */
-        write_dt(&gdt_table[__USER_CS >> 3], 0, 0xfffff,
-                 DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
-                 DESC_L_MASK |
-                 (3 << DESC_DPL_SHIFT) | (0xa << DESC_TYPE_SHIFT));
+        if (is_32_bit)
+        {
+            write_dt(&gdt_table[__USER_CS >> 3], 0, 0xfffff,
+                    DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
+                    (3 << DESC_DPL_SHIFT) | (0xa << DESC_TYPE_SHIFT));
+        }
+        else
+        {
+            /* 64 bit code segment */
+            write_dt(&gdt_table[__USER_CS >> 3], 0, 0xfffff,
+                    DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
+                    DESC_L_MASK |
+                    (3 << DESC_DPL_SHIFT) | (0xa << DESC_TYPE_SHIFT));
+        }
         write_dt(&gdt_table[__USER_DS >> 3], 0, 0xfffff,
-                 DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
-                 (3 << DESC_DPL_SHIFT) | (0x2 << DESC_TYPE_SHIFT));
+                DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
+                (3 << DESC_DPL_SHIFT) | (0x2 << DESC_TYPE_SHIFT));
     }
     cpu_x86_load_seg(env, R_CS, __USER_CS);
     cpu_x86_load_seg(env, R_SS, __USER_DS);
-    cpu_x86_load_seg(env, R_DS, 0);
-    cpu_x86_load_seg(env, R_ES, 0);
-    cpu_x86_load_seg(env, R_FS, 0);
-    cpu_x86_load_seg(env, R_GS, 0);
+    if (is_32_bit)
+    {
+        cpu_x86_load_seg(env, R_DS, __USER_DS);
+        cpu_x86_load_seg(env, R_ES, __USER_DS);
+        cpu_x86_load_seg(env, R_FS, __USER_DS);
+        cpu_x86_load_seg(env, R_GS, __USER_DS);
+        /* ??? */
+        /* env->segs[R_FS].selector = 0; */
+    }
+    else
+    {
+        cpu_x86_load_seg(env, R_DS, 0);
+        cpu_x86_load_seg(env, R_ES, 0);
+        cpu_x86_load_seg(env, R_FS, 0);
+        cpu_x86_load_seg(env, R_GS, 0);
+    }
     env->segs[R_GS].base = h2g(guest_teb);
 
     guest_teb->Tib.StackBase = (void *)(h2g(stack) + stack_reserve);
@@ -839,6 +870,9 @@ int main(int argc, char **argv, char **envp)
     unsigned long min_addr;
     FILE *min_file = fopen("/proc/sys/vm/mmap_min_addr", "r");
 
+    /* FIXME: The order of operations is a mess, especially setting up the TEB and loading the
+     * guest binary. */
+
     /* Try to block the low 4 GB. We will free it later. If we're running a 32 bit program, we
      * will block the entire address space before freeing the low 4 GB to force allocations into
      * a 32 bit address space. */
@@ -872,6 +906,10 @@ int main(int argc, char **argv, char **envp)
     __wine_main_argv += optind;
     __wine_main_wargv += optind;
 
+    i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
+    filenameW = my_alloc(i * sizeof(*filenameW));
+    MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, i);
+
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
@@ -901,10 +939,6 @@ int main(int argc, char **argv, char **envp)
 
     init_process_params(argv + optind, filename);
 
-    i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
-    filenameW = my_alloc(i * sizeof(*filenameW));
-    MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, i);
-
     if (!load_host_dlls())
     {
         fprintf(stderr, "Failed to load host DLLs\n");
@@ -914,6 +948,9 @@ int main(int argc, char **argv, char **envp)
     is_32_bit = qemu_is_32_bit_exe(filenameW);
     if (is_32_bit)
     {
+        free_teb(guest_teb);
+        init_thread_cpu();
+
         if (!low2gb || !low4gb)
         {
             fprintf(stderr, "Failed to reserve low 4 GB, cannot set up address space for Win32.\n");
@@ -921,6 +958,7 @@ int main(int argc, char **argv, char **envp)
         }
         growstack();
         block_address_space();
+        fprintf(stderr, "32 bit environment set up\n");
     }
 
     if (low2gb)
