@@ -285,4 +285,6 @@ typedef struct DECLSPEC_ALIGN(16) {
 } CONTEXT_X86_64;
 
 extern uint64_t guest_exception_handler, guest_call_entry;
+extern BOOL is_32_bit;
+
 #endif /* QEMU_H */
