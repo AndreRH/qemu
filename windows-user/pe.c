@@ -179,7 +179,8 @@ static inline BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module,
      * compile guest code, so we have to dump the wrapper that unpacks the structure
      * here in bytecode form. I could of course extend qemu_execute to support more
      * params, but I am not convinced this would be easier, as it would still need
-     * platform-specific handling.
+     * platform-specific handling. Note that the __fastcall passes the first argument
+     * in ECX in 32 bit, which is similar to the Win64 convention.
      *
      * #include <windows.h>
      * #include <stdint.h>
@@ -194,7 +195,7 @@ static inline BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module,
      *
      *  typedef DWORD (CALLBACK *DLLENTRYPROC)(HMODULE,DWORD,LPVOID);
      *
-     *  uint64_t call_init(const struct DllMain_call_data *f)
+     *  uint64_t __fastcall call_init(const struct DllMain_call_data *f)
      *  {
      *      DLLENTRYPROC proc = (DLLENTRYPROC)f->func;
      *      return proc((HMODULE)f->module, f->reason, (void *)f->reserved);
@@ -212,6 +213,7 @@ static inline BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module,
         0x48, 0x83, 0xc4, 0x28,     /* add    $0x28,%rsp        */
         0xc3,                       /* retq                     */
     };
+    static char *i386_wrapper;
     struct DllMain_call_data
     {
         uint64_t func;
@@ -221,13 +223,43 @@ static inline BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module,
     };
 
     struct DllMain_call_data call;
+    struct DllMain_call_data *call2 = &call;
+    BOOL ret;
 
-    call.func = QEMU_H2G(proc);
-    call.module = (uint64_t)module;
-    call.reason = reason;
-    call.reserved = (uint64_t)reserved;
+    if (is_32_bit && !i386_wrapper)
+    {
+        static const char template[] =
+        {
+            0x83, 0xec, 0x1c,           /* sub    $0x1c,%esp        */
+            0x8b, 0x41, 0x18,           /* mov    0x18(%ecx),%eax   */
+            0x89, 0x44, 0x24, 0x08,     /* mov    %eax,0x8(%esp)    */
+            0x8b, 0x41, 0x10,           /* mov    0x10(%ecx),%eax   */
+            0x89, 0x44, 0x24, 0x04,     /* mov    %eax,0x4(%esp)    */
+            0x8b, 0x41, 0x08,           /* mov    0x8(%ecx),%eax    */
+            0x89, 0x04, 0x24,           /* mov    %eax,(%esp)       */
+            0xff, 0x11,                 /* call   *(%ecx)           */
+            0x83, 0xec, 0x0c,           /* sub    $0xc,%esp         */
+            0x31, 0xd2,                 /* xor    %edx,%edx         */
+            0x83, 0xc4, 0x1c,           /* add    $0x1c,%esp        */
+            0xc3,                       /* ret                      */
+        };
+        /* Alloc it on the heap, qemu's static data is loaded > 4GB. */
+        i386_wrapper = my_alloc(sizeof(template));
+        memcpy(i386_wrapper, template, sizeof(template));
+    }
 
-    return qemu_execute(x86_64_wrapper, QEMU_H2G(&call));
+    if (is_32_bit)
+        call2 = my_alloc(sizeof(*call2));
+
+    call2->func = QEMU_H2G(proc);
+    call2->module = (uint64_t)module;
+    call2->reason = reason;
+    call2->reserved = (uint64_t)reserved;
+
+    ret = qemu_execute(is_32_bit ? i386_wrapper : x86_64_wrapper, QEMU_H2G(call2));
+    if (call2 != &call)
+        my_free(call2);
+    return ret;
 }
 
 /*************************************************************************
