@@ -3158,3 +3158,22 @@ BOOL qemu_get_ldr_module(HANDLE process, HMODULE mod, void **ldr)
     *ldr = &wm->ldr;
     return TRUE;
 }
+
+/* If the file is not a valid exe file just return 64 bit. We'll terminate later. */
+BOOL qemu_is_32_bit_exe(const WCHAR *name)
+{
+    HMODULE module = qemu_LoadLibrary(name, LOAD_LIBRARY_AS_DATAFILE);
+    IMAGE_NT_HEADERS *hdr;
+    BOOL ret = FALSE;
+
+    if (!module)
+        return FALSE;
+
+    hdr = RtlImageNtHeader((HMODULE)((ULONG_PTR)module - 1));
+    if (hdr)
+        ret = hdr->FileHeader.Machine == IMAGE_FILE_MACHINE_I386;
+
+    qemu_FreeLibrary(module);
+    WINE_TRACE("%s is a %u bit app\n", wine_dbgstr_w(name), ret ? 32 : 64);
+    return ret;
+}

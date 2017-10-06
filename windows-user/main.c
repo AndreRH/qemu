@@ -46,11 +46,11 @@ char *exec_path;
 
 int singlestep;
 static const char *filename;
-unsigned long mmap_min_addr;
 unsigned long guest_base;
 int have_guest_base;
 unsigned long reserved_va;
 static struct qemu_pe_image image;
+BOOL is_32_bit;
 
 PEB guest_PEB;
 static PEB_LDR_DATA guest_ldr;
@@ -793,12 +793,69 @@ static void init_process_params(char **argv, const char *filenme)
     InitializeListHead( &guest_ldr.InInitializationOrderModuleList );
 }
 
+/* After blocking the 64 bit address space the host stack has no room to grow. Reserve some
+ * space now. */
+static void growstack(void)
+{
+    volatile char blob[1048576*4];
+    memset((char *)blob, 0xad, sizeof(blob));
+}
+
+static void block_address_space(void)
+{
+    void *map;
+    unsigned long size = 1UL << 63UL;
+
+    /* mmap as much as possible. */
+    while(size >= 4096)
+    {
+        do
+        {
+            map = mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+        } while(map != (void *)0xffffffffffffffff);
+        size >>= 1;
+    }
+
+    /* It appears that the heap manager has a few pages we can't mmap, but malloc will successfully
+     * allocate from. On my system this gives me about 140kb of memory. */
+    size = 1UL << 63UL;
+    while(size)
+    {
+        do
+        {
+            map = malloc(size);
+        } while(map);
+        size >>= 1;
+    }
+}
+
 int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module, shlwapi_module;
     int optind, i;
     WCHAR *filenameW;
     int ret;
+    void *low2gb = NULL, *low4gb = NULL;
+    unsigned long min_addr;
+    FILE *min_file = fopen("/proc/sys/vm/mmap_min_addr", "r");
+
+    /* Try to block the low 4 GB. We will free it later. If we're running a 32 bit program, we
+     * will block the entire address space before freeing the low 4 GB to force allocations into
+     * a 32 bit address space. */
+    if (min_file && fscanf(min_file, "%lu", &min_addr) == 1)
+    {
+        low2gb = mmap((void *)min_addr, 0x80000000 - min_addr, PROT_NONE,
+                MAP_FIXED | MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+        low4gb = mmap((void *)0x80000000, 0x80000000, PROT_NONE,
+                MAP_FIXED | MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+    }
+    else
+    {
+        fprintf(stderr, "Cannot read mmap_min_addr, 32 bit programs will fail.\n");
+    }
+
+    if (min_file)
+        fclose(min_file);
 
     parallel_cpus = true;
 
@@ -847,6 +904,31 @@ int main(int argc, char **argv, char **envp)
     i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
     filenameW = my_alloc(i * sizeof(*filenameW));
     MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, i);
+
+    if (!load_host_dlls())
+    {
+        fprintf(stderr, "Failed to load host DLLs\n");
+        ExitProcess(EXIT_FAILURE);
+    }
+
+    is_32_bit = qemu_is_32_bit_exe(filenameW);
+    if (is_32_bit)
+    {
+        if (!low2gb || !low4gb)
+        {
+            fprintf(stderr, "Failed to reserve low 4 GB, cannot set up address space for Win32.\n");
+            ExitProcess(EXIT_FAILURE);
+        }
+        growstack();
+        block_address_space();
+    }
+
+    if (low2gb)
+        munmap(low2gb, 0x80000000 - min_addr);
+    if (low4gb)
+        munmap(low4gb, 0x80000000); /* FIXME: Only if large address aware. */
+
+
     exe_module = qemu_LoadLibrary(filenameW, 0);
     my_free(filenameW);
     if (!exe_module)
@@ -874,12 +956,6 @@ int main(int argc, char **argv, char **envp)
         env->regs[R_ESP] = h2g(stack) + image.stack_reserve;
         guest_teb->Tib.StackBase = (void *)(h2g(stack) + image.stack_reserve);
         guest_teb->Tib.StackLimit = (void *)h2g(stack);
-    }
-
-    if (!load_host_dlls())
-    {
-        fprintf(stderr, "Failed to load host DLLs\n");
-        ExitProcess(EXIT_FAILURE);
     }
 
     signal_init();
