@@ -409,23 +409,41 @@ static void cpu_loop(const void *code)
     }
 }
 
-static const char ret_code[] =
-{
-    0x48, 0x31, 0xc9,   /* xor %rcx, %rcx */
-    0x0f, 0x05          /* syscall        */
-};
-
 uint64_t qemu_execute(const void *code, uint64_t rcx)
 {
     CPUState *cs;
     CPUX86State *env;
     uint64_t backup_eip, retval;
     target_ulong backup_regs[CPU_NB_REGS];
+    static char *ret_code;
 
     if (!code)
     {
         fprintf(stderr, "Attempting to execute NULL.\n");
         ExitProcess(1);
+    }
+
+    if (!ret_code)
+    {
+        if (is_32_bit)
+        {
+            static const char ret_code32[] =
+            {
+                0x31, 0xc9,         /* xor %ecx, %ecx */
+                0x0f, 0x05          /* syscall        */
+            };
+            ret_code = my_alloc(sizeof(ret_code32));
+            memcpy(ret_code, ret_code32, sizeof(ret_code32));
+        }
+        else
+        {
+            static char ret_code64[] =
+            {
+                0x48, 0x31, 0xc9,   /* xor %rcx, %rcx */
+                0x0f, 0x05          /* syscall        */
+            };
+            ret_code = ret_code64;
+        }
     }
 
     /* The basic idea of this function is to back up all registers, write the function argument
@@ -460,10 +478,18 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
     memcpy(backup_regs, env->regs, sizeof(backup_regs));
     env->regs[R_ECX] = rcx;
 
-    /* FIXME: This is 64 bit specific. Implement the 32 bit WINAPI calling convention too. */
-    env->regs[R_ESP] -= 0x28; /* Reserve 32 bytes + 8 for the return address. */
-    /* Write the address of our return code onto the stack. */
-    *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
+    if (is_32_bit)
+    {
+        env->regs[R_ESP] -= 0x24; /* Keeps the longjmp detection simpler */
+        /* Write the address of our return code onto the stack. */
+        *(uint32_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
+    }
+    else
+    {
+        env->regs[R_ESP] -= 0x28; /* Reserve 32 bytes + 8 for the return address. */
+        /* Write the address of our return code onto the stack. */
+        *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
+    }
 
     qemu_log("Going to call guest code %p.\n", code);
     cpu_loop(code);
@@ -950,17 +976,20 @@ int main(int argc, char **argv, char **envp)
 
     init_process_params(argv + optind, filename);
 
+    is_32_bit = qemu_is_32_bit_exe(filenameW);
+
     if (!load_host_dlls())
     {
         fprintf(stderr, "Failed to load host DLLs\n");
         ExitProcess(EXIT_FAILURE);
     }
 
-    is_32_bit = qemu_is_32_bit_exe(filenameW);
     if (is_32_bit)
     {
+        RemoveEntryList( &guest_teb->TlsLinks );
         free_teb(guest_teb);
-        init_thread_cpu();
+        memset(&guest_PEB, 0, sizeof(guest_PEB));
+        init_process_params(argv + optind, filename);
 
         if (!low2gb || !low4gb)
         {
@@ -969,7 +998,6 @@ int main(int argc, char **argv, char **envp)
         }
         growstack();
         block_address_space();
-        fprintf(stderr, "32 bit environment set up\n");
     }
 
     if (low2gb)
@@ -977,6 +1005,12 @@ int main(int argc, char **argv, char **envp)
     if (low4gb)
         munmap(low4gb, 0x80000000); /* FIXME: Only if large address aware. */
 
+    if (is_32_bit)
+    {
+        /* Re-init the CPU with (hopefully) 32 bit pointers. */
+        init_thread_cpu();
+        fprintf(stderr, "32 bit environment set up\n");
+    }
 
     exe_module = qemu_LoadLibrary(filenameW, 0);
     my_free(filenameW);
