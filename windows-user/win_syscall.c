@@ -80,7 +80,10 @@ BOOL load_host_dlls(void)
 
     GetModuleFileNameA(NULL, path, MAX_PATH);
     pPathRemoveFileSpecA(path);
-    strcat(path, "\\qemu_host_dll\\*");
+    if (is_32_bit)
+        strcat(path, "\\qemu_host_dll32\\*");
+    else
+        strcat(path, "\\qemu_host_dll64\\*");
     find_handle = FindFirstFileA(path, &find_data);
     if (find_handle == INVALID_HANDLE_VALUE)
     {
@@ -94,7 +97,10 @@ BOOL load_host_dlls(void)
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             continue;
 
-        sprintf(path, "qemu_host_dll\\%s.", find_data.cFileName);
+        if (is_32_bit)
+            sprintf(path, "qemu_host_dll32\\%s.", find_data.cFileName);
+        else
+            sprintf(path, "qemu_host_dll64\\%s.", find_data.cFileName);
         qemu_log_mask(LOG_WIN32, "trying to load %s\n", path);
         HMODULE mod = LoadLibraryA(path);
         if (!mod)
