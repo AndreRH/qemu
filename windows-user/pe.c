@@ -1880,16 +1880,26 @@ done:
 
 static WCHAR *get_guest_dll_path(void)
 {
+    static BOOL cached_32 = FALSE;
     static WCHAR *cached_path;
-    static const WCHAR qemu_guest_dll[] = {'\\','q', 'e', 'm', 'u', '_', 'g', 'u', 'e', 's', 't', '_', 'd', 'l', 'l', '\\', 0};
+    static const WCHAR qemu_guest_dll32[] =
+            {'\\','q','e','m','u','_','g','u','e','s','t','_','d','l','l','3','2','\\', 0};
+    static const WCHAR qemu_guest_dll64[] =
+            {'\\','q','e','m','u','_','g','u','e','s','t','_','d','l','l','6','4','\\', 0};
 
-    if (cached_path)
+    if (cached_path && cached_32 == is_32_bit)
         return cached_path;
 
-    cached_path = HeapAlloc(GetProcessHeap(), 0, (MAX_PATH + 10) * sizeof(*cached_path));
+    HeapFree(GetProcessHeap(), 0, cached_path);
+
+    cached_32 = is_32_bit;
+    cached_path = HeapAlloc(GetProcessHeap(), 0, (MAX_PATH + 12) * sizeof(*cached_path));
     GetModuleFileNameW(NULL, cached_path, MAX_PATH);
     pPathRemoveFileSpecW(cached_path);
-    lstrcatW(cached_path, qemu_guest_dll);
+    if (is_32_bit)
+        lstrcatW(cached_path, qemu_guest_dll32);
+    else
+        lstrcatW(cached_path, qemu_guest_dll64);
 
     return cached_path;
 }
