@@ -472,22 +472,32 @@ static BOOL import_dll( HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *descr, LP
     HMODULE imp_mod;
     const IMAGE_EXPORT_DIRECTORY *exports;
     DWORD exp_size;
-    const IMAGE_THUNK_DATA *import_list;
-    IMAGE_THUNK_DATA *thunk_list;
+    const IMAGE_THUNK_DATA64 *import_list64;
+    const IMAGE_THUNK_DATA32 *import_list32;
+    IMAGE_THUNK_DATA64 *thunk_list64;
+    IMAGE_THUNK_DATA32 *thunk_list32;
     WCHAR buffer[32];
     const char *name = get_rva( module, descr->Name );
     DWORD len = strlen(name);
     PVOID protect_base;
     SIZE_T protect_size = 0;
     DWORD protect_old;
+    ULONGLONG orig_ordinal;
 
-    thunk_list = get_rva( module, (DWORD)descr->FirstThunk );
+    thunk_list64 = get_rva( module, (DWORD)descr->FirstThunk );
+    thunk_list32 = get_rva( module, (DWORD)descr->FirstThunk );
     if (descr->u.OriginalFirstThunk)
-        import_list = get_rva( module, (DWORD)descr->u.OriginalFirstThunk );
+    {
+        import_list64 = get_rva( module, (DWORD)descr->u.OriginalFirstThunk );
+        import_list32 = get_rva( module, (DWORD)descr->u.OriginalFirstThunk );
+    }
     else
-        import_list = thunk_list;
+    {
+        import_list64 = thunk_list64;
+        import_list32 = thunk_list32;
+    }
 
-    if (!import_list->u1.Ordinal)
+    if (!(is_32_bit ? import_list32->u1.Ordinal: import_list64->u1.Ordinal))
     {
         WINE_WARN( "Skipping unused import %s\n", name );
         *pwm = NULL;
@@ -525,9 +535,16 @@ static BOOL import_dll( HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *descr, LP
 
     /* unprotect the import address table since it can be located in
      * readonly section */
-    while (import_list[protect_size].u1.Ordinal) protect_size++;
-    protect_base = thunk_list;
-    protect_size *= sizeof(*thunk_list);
+    if (is_32_bit)
+    {
+        while (import_list32[protect_size].u1.Ordinal) protect_size++;
+    }
+    else
+    {
+        while (import_list64[protect_size].u1.Ordinal) protect_size++;
+    }
+    protect_base = thunk_list64;
+    protect_size *= is_32_bit ? sizeof(*thunk_list32) : sizeof(*thunk_list64);
     NtProtectVirtualMemory( NtCurrentProcess(), &protect_base,
                             &protect_size, PAGE_READWRITE, &protect_old );
 
@@ -537,67 +554,93 @@ static BOOL import_dll( HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *descr, LP
     if (!exports)
     {
         /* set all imported function to deadbeef */
-        while (import_list->u1.Ordinal)
+        while ((orig_ordinal = is_32_bit ? import_list32->u1.Ordinal : import_list64->u1.Ordinal))
         {
             static const char dbgbreak[] = {0xcc};
-            if (IMAGE_SNAP_BY_ORDINAL(import_list->u1.Ordinal))
+            if (IMAGE_SNAP_BY_ORDINAL(orig_ordinal))
             {
-                int ordinal = IMAGE_ORDINAL(import_list->u1.Ordinal);
+                int ordinal = IMAGE_ORDINAL(orig_ordinal);
                 WINE_ERR("No implementation for %s.%d", name, ordinal );
-                thunk_list->u1.Function = (ULONG_PTR)dbgbreak;
+                if (is_32_bit)
+                    thunk_list32->u1.Function = (ULONG_PTR)dbgbreak;
+                else
+                    thunk_list64->u1.Function = (ULONG_PTR)dbgbreak;
             }
             else
             {
-                IMAGE_IMPORT_BY_NAME *pe_name = get_rva( module, (DWORD)import_list->u1.AddressOfData );
+                IMAGE_IMPORT_BY_NAME *pe_name;
+                if (is_32_bit)
+                    pe_name = get_rva( module, (DWORD)import_list32->u1.AddressOfData );
+                else
+                    pe_name = get_rva( module, (DWORD)import_list64->u1.AddressOfData );
                 WINE_ERR("No implementation for %s.%s", name, pe_name->Name );
-                thunk_list->u1.Function = (ULONG_PTR)dbgbreak;
+                if (is_32_bit)
+                    thunk_list32->u1.Function = (ULONG_PTR)dbgbreak;
+                else
+                    thunk_list64->u1.Function = (ULONG_PTR)dbgbreak;
             }
             WINE_WARN(" imported from %s, allocating stub %p\n",
                  wine_dbgstr_w(current_modref->ldr.FullDllName.Buffer),
-                 (void *)thunk_list->u1.Function );
-            import_list++;
-            thunk_list++;
+                 (void *)dbgbreak );
+            import_list64++;
+            thunk_list64++;
+            import_list32++;
+            thunk_list32++;
         }
         goto done;
     }
 
-    while (import_list->u1.Ordinal)
+    while ((orig_ordinal = is_32_bit ? import_list32->u1.Ordinal : import_list64->u1.Ordinal))
     {
+        ULONG_PTR func;
         static const char dbgbreak[] = {0xcc};
-        if (IMAGE_SNAP_BY_ORDINAL(import_list->u1.Ordinal))
+        if (IMAGE_SNAP_BY_ORDINAL(orig_ordinal))
         {
-            int ordinal = IMAGE_ORDINAL(import_list->u1.Ordinal);
+            int ordinal = IMAGE_ORDINAL(orig_ordinal);
 
-            thunk_list->u1.Function = (ULONG_PTR)find_ordinal_export( imp_mod, exports, exp_size,
+            func = (ULONG_PTR)find_ordinal_export( imp_mod, exports, exp_size,
                                                                       ordinal - exports->Base, load_path, NULL );
-            if (!thunk_list->u1.Function)
+            if (!func)
             {
-                thunk_list->u1.Function = (ULONG_PTR)dbgbreak;
+                func = (ULONG_PTR)dbgbreak;
                 WINE_FIXME("No implementation for %s.%d imported from %s, setting to %p\n",
                      name, ordinal, wine_dbgstr_w(current_modref->ldr.FullDllName.Buffer),
-                     (void *)thunk_list->u1.Function );
+                     (void *)func );
             }
-            WINE_TRACE("--- Ordinal %s.%d = %p\n", name, ordinal, (void *)thunk_list->u1.Function );
+            WINE_TRACE("--- Ordinal %s.%d = %p\n", name, ordinal, (void *)func );
+            if (is_32_bit)
+                thunk_list32->u1.Function = func;
+            else
+                thunk_list64->u1.Function = func;
         }
         else  /* import by name */
         {
             IMAGE_IMPORT_BY_NAME *pe_name;
-            pe_name = get_rva( module, (DWORD)import_list->u1.AddressOfData );
-            thunk_list->u1.Function = (ULONG_PTR)find_named_export( imp_mod, exports, exp_size,
+            if (is_32_bit)
+                pe_name = get_rva( module, (DWORD)import_list32->u1.AddressOfData );
+            else
+                pe_name = get_rva( module, (DWORD)import_list64->u1.AddressOfData );
+            func = (ULONG_PTR)find_named_export( imp_mod, exports, exp_size,
                                                                     (const char*)pe_name->Name,
                                                                     pe_name->Hint, load_path );
-            if (!thunk_list->u1.Function)
+            if (!func)
             {
-                thunk_list->u1.Function = (ULONG_PTR)dbgbreak;
+                func = (ULONG_PTR)dbgbreak;
                 WINE_FIXME("No implementation for %s.%s imported from %s, setting to %p\n",
                      name, pe_name->Name, wine_dbgstr_w(current_modref->ldr.FullDllName.Buffer),
-                     (void *)thunk_list->u1.Function );
+                     (void *)func );
             }
             WINE_TRACE("--- %s %s.%d = %p\n",
-                            pe_name->Name, name, pe_name->Hint, (void *)thunk_list->u1.Function);
+                            pe_name->Name, name, pe_name->Hint, (void *)func);
+            if (is_32_bit)
+                thunk_list32->u1.Function = func;
+            else
+                thunk_list64->u1.Function = func;
         }
-        import_list++;
-        thunk_list++;
+        import_list64++;
+        thunk_list64++;
+        import_list32++;
+        thunk_list32++;
     }
 
 done:
