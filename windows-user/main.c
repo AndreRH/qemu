@@ -862,6 +862,18 @@ static void block_address_space(void)
 {
     void *map;
     unsigned long size = 1UL << 63UL;
+    HANDLE msvcrt;
+    HANDLE (* CDECL p__get_heap_handle)(void);
+    HANDLE msvcrt_heap;
+
+    msvcrt = GetModuleHandleA("msvcrt");
+    p__get_heap_handle = (void *)GetProcAddress(msvcrt, "_get_heap_handle");
+    if (!p__get_heap_handle)
+    {
+        fprintf(stderr, "Cannot get msvcrt._get_heap_handle\n");
+        ExitProcess(1);
+    }
+    msvcrt_heap = p__get_heap_handle();
 
     /* mmap as much as possible. */
     while(size >= 4096)
@@ -892,6 +904,17 @@ static void block_address_space(void)
         do
         {
             map = my_alloc(size);
+        } while(map);
+        size >>= 1;
+    }
+
+    /* And the msvcrt heap. */
+    size = 1UL << 63UL;
+    while(size)
+    {
+        do
+        {
+            map = HeapAlloc(msvcrt_heap, 0, size);
         } while(map);
         size >>= 1;
     }
