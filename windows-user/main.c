@@ -1039,7 +1039,8 @@ int main(int argc, char **argv, char **envp)
         RemoveEntryList( &guest_teb->TlsLinks );
         free_teb(guest_teb, guest_teb32);
         memset(&guest_PEB, 0, sizeof(guest_PEB));
-        init_process_params(argv + optind, filename);
+        my_free(process_params.CommandLine.Buffer);
+        memset(&process_params, 0, sizeof(process_params));
 
         if (!low2gb || !low4gb)
         {
@@ -1058,6 +1059,7 @@ int main(int argc, char **argv, char **envp)
     if (is_32_bit)
     {
         /* Re-init the CPU with (hopefully) 32 bit pointers. */
+        init_process_params(argv + optind, filename);
         init_thread_cpu();
         fprintf(stderr, "32 bit environment set up\n");
     }
