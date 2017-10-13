@@ -53,6 +53,7 @@ static struct qemu_pe_image image;
 BOOL is_32_bit;
 
 PEB guest_PEB;
+PEB guest_PEB32;
 static PEB_LDR_DATA guest_ldr;
 static RTL_USER_PROCESS_PARAMETERS process_params;
 static RTL_BITMAP guest_tls_bitmap;
@@ -61,6 +62,7 @@ static RTL_BITMAP guest_fls_bitmap;
 
 __thread CPUState *thread_cpu;
 __thread TEB *guest_teb;
+__thread TEB32 *guest_teb32;
 
 /* Helper function to read the TEB exception filter chain. */
 uint64_t guest_exception_handler, guest_call_entry;
@@ -123,15 +125,18 @@ static void set_idt(int n, unsigned int dpl)
     set_gate64(idt_table + n * 2, 0, dpl, 0, 0);
 }
 
-static void free_teb(TEB *teb)
+static void free_teb(TEB *teb, TEB32 *teb32)
 {
     VirtualFree(teb->Tib.StackLimit, 0, MEM_RELEASE);
     VirtualFree(teb, 0, MEM_RELEASE);
+    if (teb32)
+        VirtualFree(teb32, 0, MEM_RELEASE);
 }
 
-static TEB *alloc_teb(void)
+static TEB *alloc_teb(TEB32 **teb32)
 {
     TEB *ret;
+    TEB32 *ret32 = NULL;
 
     ret = VirtualAlloc(NULL, 0x2000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (!ret)
@@ -144,6 +149,21 @@ static TEB *alloc_teb(void)
     ret->Tib.ExceptionList = (void *)~0UL;
     ret->Peb = &guest_PEB;
 
+    if (is_32_bit)
+    {
+        ret32 = VirtualAlloc(NULL, 0x2000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        if (!ret)
+        {
+            fprintf(stderr, "Failed to allocate 32 bit TEB\n");
+            ExitProcess(1);
+        }
+
+        ret32->Tib.Self = (qemu_ptr)(ULONG_PTR)&ret32->Tib;
+        ret32->Tib.ExceptionList = ~0U;
+        ret32->Peb = (qemu_ptr)(ULONG_PTR)&guest_PEB32;
+    }
+
+    *teb32 = ret32;
     return ret;
 }
 
@@ -159,7 +179,7 @@ static void init_thread_cpu(void)
     CPUState *cpu = thread_cpu;
     DWORD stack_reserve = image.stack_reserve ? image.stack_reserve : DEFAULT_STACK_SIZE;
 
-    guest_teb = alloc_teb();
+    guest_teb = alloc_teb(&guest_teb32);
 
     if (!cpu)
         cpu = cpu_create(X86_CPU_TYPE_NAME("qemu64"));
@@ -278,6 +298,13 @@ static void init_thread_cpu(void)
 
     guest_teb->Tib.StackBase = (void *)(h2g(stack) + stack_reserve);
     guest_teb->Tib.StackLimit = (void *)h2g(stack);
+
+    if (guest_teb32)
+    {
+        env->segs[R_FS].base = h2g(guest_teb32);
+        guest_teb32->Tib.StackBase = (qemu_ptr)(h2g(stack) + stack_reserve);
+        guest_teb32->Tib.StackLimit = (qemu_ptr)h2g(stack);
+    }
 
     qemu_loader_thread_init();
 
@@ -1010,7 +1037,7 @@ int main(int argc, char **argv, char **envp)
     if (is_32_bit)
     {
         RemoveEntryList( &guest_teb->TlsLinks );
-        free_teb(guest_teb);
+        free_teb(guest_teb, guest_teb32);
         memset(&guest_PEB, 0, sizeof(guest_PEB));
         init_process_params(argv + optind, filename);
 
@@ -1062,6 +1089,11 @@ int main(int argc, char **argv, char **envp)
         env->regs[R_ESP] = h2g(stack) + image.stack_reserve;
         guest_teb->Tib.StackBase = (void *)(h2g(stack) + image.stack_reserve);
         guest_teb->Tib.StackLimit = (void *)h2g(stack);
+        if (guest_teb32)
+        {
+            guest_teb32->Tib.StackBase = (qemu_ptr)(h2g(stack) + image.stack_reserve);
+            guest_teb32->Tib.StackLimit = (qemu_ptr)h2g(stack);
+        }
     }
 
     signal_init();
