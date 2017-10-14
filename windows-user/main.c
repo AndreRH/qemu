@@ -1059,6 +1059,10 @@ int main(int argc, char **argv, char **envp)
     if (is_32_bit)
     {
         /* Re-init the CPU with (hopefully) 32 bit pointers. */
+
+        /* Need a heap handle < 2^32. Hopefully we don't free old allocs :-) */
+        NtCurrentTeb()->Peb->ProcessHeap = HeapCreate(HEAP_GROWABLE, 0, 0);
+
         init_process_params(argv + optind, filename);
         init_thread_cpu();
         fprintf(stderr, "32 bit environment set up\n");
