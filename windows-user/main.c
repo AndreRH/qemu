@@ -212,6 +212,9 @@ static void init_thread_cpu(void)
     /* flags setup : we activate the IRQs by default as in user mode */
     env->eflags |= IF_MASK;
 
+    /* FPU control word. */
+    cpu_set_fpuc(env, 0x27f);
+
     /* FIXME: I should RESERVE stack_reserve bytes, and commit only stack_commit bytes and
      * place a guard page at the end of the committed range. This will need exception handing
      * (and better knowledge in my brain), so commit the entire stack for now.
