@@ -1375,7 +1375,7 @@ static NTSTATUS WINAPI qemu_LdrGetProcedureAddress(HMODULE module, const ANSI_ST
     {
         LPCWSTR load_path = qemu_getTEB()->Peb->ProcessParameters->DllPath.Buffer;
         void *proc = name ? find_named_export( module, exports, exp_size, name->Buffer, -1, load_path )
-                          : find_ordinal_export( module, exports, exp_size, ord - exports->Base, load_path, name->Buffer );
+                          : find_ordinal_export( module, exports, exp_size, ord - exports->Base, load_path, NULL );
         if (proc)
         {
             *address = proc;
