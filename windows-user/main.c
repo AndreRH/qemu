@@ -875,6 +875,8 @@ static void init_process_params(char **argv, const char *filenme)
     InitializeListHead( &guest_ldr.InLoadOrderModuleList );
     InitializeListHead( &guest_ldr.InMemoryOrderModuleList );
     InitializeListHead( &guest_ldr.InInitializationOrderModuleList );
+
+    guest_PEB.ProcessParameters->CurrentDirectory = NtCurrentTeb()->Peb->ProcessParameters->CurrentDirectory;
 }
 
 /* After blocking the 64 bit address space the host stack has no room to grow. Reserve some
