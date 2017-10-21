@@ -56,6 +56,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qemu_module);
 
+#undef IMAGE_SNAP_BY_ORDINAL
+#define IMAGE_SNAP_BY_ORDINAL(a) (is_32_bit ? IMAGE_SNAP_BY_ORDINAL32(a) : IMAGE_SNAP_BY_ORDINAL64(a))
+
 struct nt_header
 {
     DWORD Signature;
