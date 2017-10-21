@@ -62,7 +62,7 @@ static const struct qemu_ops ops =
     qemu_DllMain,
 };
 
-BOOL load_host_dlls(void)
+BOOL load_host_dlls(BOOL load_msvcrt)
 {
     const syscall_handler *handlers;
     uint32_t dll_num;
@@ -72,11 +72,14 @@ BOOL load_host_dlls(void)
     struct load_host_dlls *new_ptr;
     char path[MAX_PATH];
 
-    dll_count = 2;
-    dlls = my_alloc(sizeof(*dlls) * dll_count);
     if (!dlls)
-        return FALSE;
-    memset(dlls, 0, sizeof(*dlls) * dll_count);
+    {
+        dll_count = 2;
+        dlls = my_alloc(sizeof(*dlls) * dll_count);
+        if (!dlls)
+            return FALSE;
+        memset(dlls, 0, sizeof(*dlls) * dll_count);
+    }
 
     GetModuleFileNameA(NULL, path, MAX_PATH);
     pPathRemoveFileSpecA(path);
@@ -95,6 +98,11 @@ BOOL load_host_dlls(void)
         syscall_lib_register fn;
 
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+
+        /* We load the msvcrt libs after the 32 bit VM setup to make sure its
+         * gigantic amount of data pointers is accessible. */
+        if (!strstr(find_data.cFileName, "qemu_msvcr") == !!load_msvcrt)
             continue;
 
         if (is_32_bit)

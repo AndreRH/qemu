@@ -894,18 +894,6 @@ static void block_address_space(void)
 {
     void *map;
     unsigned long size = 1UL << 63UL;
-    HANDLE msvcrt;
-    HANDLE (* CDECL p__get_heap_handle)(void);
-    HANDLE msvcrt_heap;
-
-    msvcrt = GetModuleHandleA("msvcrt");
-    p__get_heap_handle = (void *)GetProcAddress(msvcrt, "_get_heap_handle");
-    if (!p__get_heap_handle)
-    {
-        fprintf(stderr, "Cannot get msvcrt._get_heap_handle\n");
-        ExitProcess(1);
-    }
-    msvcrt_heap = p__get_heap_handle();
 
     /* mmap as much as possible. */
     while(size >= 4096)
@@ -936,17 +924,6 @@ static void block_address_space(void)
         do
         {
             map = my_alloc(size);
-        } while(map);
-        size >>= 1;
-    }
-
-    /* And the msvcrt heap. */
-    size = 1UL << 63UL;
-    while(size)
-    {
-        do
-        {
-            map = HeapAlloc(msvcrt_heap, 0, size);
         } while(map);
         size >>= 1;
     }
@@ -1033,7 +1010,7 @@ int main(int argc, char **argv, char **envp)
 
     is_32_bit = qemu_is_32_bit_exe(filenameW);
 
-    if (!load_host_dlls())
+    if (!load_host_dlls(FALSE))
     {
         fprintf(stderr, "Failed to load host DLLs\n");
         ExitProcess(EXIT_FAILURE);
@@ -1071,6 +1048,12 @@ int main(int argc, char **argv, char **envp)
         init_process_params(argv + optind, filename);
         init_thread_cpu();
         fprintf(stderr, "32 bit environment set up\n");
+    }
+
+    if (!load_host_dlls(TRUE))
+    {
+        fprintf(stderr, "Failed to load host DLLs\n");
+        ExitProcess(EXIT_FAILURE);
     }
 
     exe_module = qemu_LoadLibrary(filenameW, 0);
