@@ -1502,20 +1502,34 @@ static NTSTATUS perform_relocations( void *module, SIZE_T len )
     const IMAGE_SECTION_HEADER *sec;
     INT_PTR delta;
     ULONG protect_old[96], i;
+    IMAGE_OPTIONAL_HEADER32 *hdr32 = NULL;
+    IMAGE_OPTIONAL_HEADER64 *hdr64 = NULL;
+    DWORD alignment;
 
     nt = RtlImageNtHeader( module );
-    base = (char *)nt->OptionalHeader.ImageBase;
+    if (is_32_bit)
+    {
+        hdr32 = (IMAGE_OPTIONAL_HEADER32 *)&nt->OptionalHeader;
+        base = (char *)(ULONG_PTR)hdr32->ImageBase;
+        alignment = hdr32->SectionAlignment;
+        relocs = &hdr32->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+    }
+    else
+    {
+        hdr64 = &nt->OptionalHeader;
+        alignment = hdr64->SectionAlignment;
+        base = (char *)hdr64->ImageBase;
+        relocs = &hdr64->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+    }
 
     assert( module != base );
 
     /* no relocations are performed on non page-aligned binaries */
-    if (nt->OptionalHeader.SectionAlignment < TARGET_PAGE_SIZE)
+    if (alignment < TARGET_PAGE_SIZE)
         return STATUS_SUCCESS;
 
     if (!(nt->FileHeader.Characteristics & IMAGE_FILE_DLL) && qemu_getTEB()->Peb->ImageBaseAddress)
         return STATUS_SUCCESS;
-
-    relocs = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
 
     if (nt->FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED)
     {
