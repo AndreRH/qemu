@@ -5992,7 +5992,11 @@ else
 fi
 
 if [ "$windows_user" = yes ]; then
-    textseg_ldflags="-Wl,-Ttext-segment=0x60000000"
+    if [ "$darwin" = yes ]; then
+        textseg_ldflags="-image_base 0x600000000"
+    else
+        textseg_ldflags="-Wl,-Ttext-segment=0x600000000"
+    fi
 fi
 
 echo_version() {
