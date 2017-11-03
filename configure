@@ -636,6 +636,8 @@ EOF
 
 if check_define __linux__ ; then
   targetos="Linux"
+elif check_define __APPLE__; then
+  targetos='Darwin'
 elif check_define _WIN32 ; then
   targetos='MINGW32'
 elif check_define __OpenBSD__ ; then
@@ -652,8 +654,6 @@ elif check_define __DragonFly__ ; then
   targetos='DragonFly'
 elif check_define __NetBSD__; then
   targetos='NetBSD'
-elif check_define __APPLE__; then
-  targetos='Darwin'
 else
   # This is a fatal error, but don't report it yet, because we
   # might be going to just print the --help text, or it might
