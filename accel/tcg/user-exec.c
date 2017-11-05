@@ -299,6 +299,7 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 int cpu_signal_handler(int host_signum, void *pinfo,
                        void *puc)
 {
+#if 0
     siginfo_t *info = pinfo;
     unsigned long pc;
 #if defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
@@ -313,6 +314,8 @@ int cpu_signal_handler(int host_signum, void *pinfo,
     return handle_cpu_signal(pc, info,
                              TRAP_sig(uc) == 0xe ? (ERROR_sig(uc) >> 1) & 1 : 0,
                              &MASK_sig(uc));
+#endif
+    return 0;
 }
 
 #elif defined(_ARCH_PPC)
