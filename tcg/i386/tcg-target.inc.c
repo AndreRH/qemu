@@ -3532,7 +3532,7 @@ typedef struct {
 /* We're expecting a 2 byte uleb128 encoded value.  */
 QEMU_BUILD_BUG_ON(FRAME_SIZE >= (1 << 14));
 
-#if !defined(__ELF__)
+#if 0 && !defined(__ELF__)
     /* Host machine without ELF. */
 #elif TCG_TARGET_REG_BITS == 64
 #define ELF_HOST_MACHINE EM_X86_64
