@@ -938,6 +938,7 @@ int main(int argc, char **argv, char **envp)
     void *low2gb = NULL, *low4gb = NULL;
     unsigned long min_addr;
     FILE *min_file = fopen("/proc/sys/vm/mmap_min_addr", "r");
+    void **osx_ptrs = wine_mmap_get_qemu_ptrs();
 
     /* FIXME: The order of operations is a mess, especially setting up the TEB and loading the
      * guest binary. */
@@ -945,7 +946,12 @@ int main(int argc, char **argv, char **envp)
     /* Try to block the low 4 GB. We will free it later. If we're running a 32 bit program, we
      * will block the entire address space before freeing the low 4 GB to force allocations into
      * a 32 bit address space. */
-    if (min_file && fscanf(min_file, "%lu", &min_addr) == 1)
+    if (osx_ptrs && osx_ptrs[0])
+    {
+        low2gb = osx_ptrs[1];
+        low4gb = osx_ptrs[2];
+    }
+    else if (min_file && fscanf(min_file, "%lu", &min_addr) == 1)
     {
         low2gb = mmap((void *)min_addr, 0x80000000 - min_addr, PROT_NONE,
                 MAP_FIXED | MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
@@ -1016,6 +1022,8 @@ int main(int argc, char **argv, char **envp)
         ExitProcess(EXIT_FAILURE);
     }
 
+    fprintf(stderr, "Lib load done, doing address space dance\n");
+    Sleep(100000);
     if (is_32_bit)
     {
         RemoveEntryList( &guest_teb->TlsLinks );
@@ -1033,8 +1041,9 @@ int main(int argc, char **argv, char **envp)
         block_address_space();
     }
 
-    if (low2gb)
-        munmap(low2gb, 0x80000000 - min_addr);
+    /* FIXME: OSX has the pesky attitude to load its libraries at the place where we want to
+     * put our executables. Prevent this by only freeing 2-4GB now, and 0-2GB after loading
+     * msvcrt. This will break apps that aren't large address aware though. */
     if (low4gb)
         munmap(low4gb, 0x80000000); /* FIXME: Only if large address aware. */
 
@@ -1055,6 +1064,11 @@ int main(int argc, char **argv, char **envp)
         fprintf(stderr, "Failed to load host DLLs\n");
         ExitProcess(EXIT_FAILURE);
     }
+
+    if (low2gb)
+        munmap(low2gb, 0x80000000 - (ULONG_PTR)low2gb);
+    if (osx_ptrs && osx_ptrs[0])
+        munmap(osx_ptrs[0], 0x100000 - (ULONG_PTR)osx_ptrs[0]);
 
     exe_module = qemu_LoadLibrary(filenameW, 0);
     my_free(filenameW);
