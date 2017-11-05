@@ -315,7 +315,7 @@ static void init_thread_cpu(void)
     thread_cpu = cpu;
 }
 
-static void cpu_env_to_context(CONTEXT_X86_64 *context, CPUX86State *env)
+static void cpu_env_to_context(qemu_CONTEXT_X86_64 *context, CPUX86State *env)
 {
     X86XSaveArea buf;
 
@@ -378,7 +378,7 @@ static void cpu_loop(const void *code)
     void *syscall;
     EXCEPTION_POINTERS except;
     EXCEPTION_RECORD exception_record;
-    CONTEXT_X86_64 guest_context;
+    qemu_CONTEXT_X86_64 guest_context;
 
     cs = thread_cpu;
     env = cs->env_ptr;
