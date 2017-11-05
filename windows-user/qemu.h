@@ -171,13 +171,13 @@ extern PEB guest_PEB;
 #define QEMU_CONTEXT_FULL (QEMU_CONTEXT_CONTROL | QEMU_CONTEXT_INTEGER | QEMU_CONTEXT_FLOATING_POINT)
 #define QEMU_CONTEXT_ALL (QEMU_CONTEXT_CONTROL | QEMU_CONTEXT_INTEGER | QEMU_CONTEXT_SEGMENTS | QEMU_CONTEXT_FLOATING_POINT | QEMU_CONTEXT_DEBUG_REGISTERS)
 
-typedef struct DECLSPEC_ALIGN(16) _M128A
+typedef struct DECLSPEC_ALIGN(16) qemu_M128A
 {
     ULONGLONG Low;
     LONGLONG High;
-} M128A, *PM128A;
+} qemu_M128A, *Pqemu_M128A;
 
-typedef struct _XMM_SAVE_AREA32
+typedef struct _qemu_XMM_SAVE_AREA32
 {
     WORD ControlWord;        /* 000 */
     WORD StatusWord;         /* 002 */
@@ -192,10 +192,10 @@ typedef struct _XMM_SAVE_AREA32
     WORD Reserved3;          /* 016 */
     DWORD MxCsr;             /* 018 */
     DWORD MxCsr_Mask;        /* 01c */
-    M128A FloatRegisters[8]; /* 020 */
-    M128A XmmRegisters[16];  /* 0a0 */
+    qemu_M128A FloatRegisters[8]; /* 020 */
+    qemu_M128A XmmRegisters[16];  /* 0a0 */
     BYTE Reserved4[96];      /* 1a0 */
-} XMM_SAVE_AREA32, *PXMM_SAVE_AREA32;
+} qemu_XMM_SAVE_AREA32, *Pqemu_XMM_SAVE_AREA32;
 
 typedef struct DECLSPEC_ALIGN(16) {
     DWORD64 P1Home;          /* 000 */
@@ -249,31 +249,31 @@ typedef struct DECLSPEC_ALIGN(16) {
 
     /* Floating point */
     union {
-        XMM_SAVE_AREA32 FltSave;  /* 100 */
+        qemu_XMM_SAVE_AREA32 FltSave;  /* 100 */
         struct {
-            M128A Header[2];      /* 100 */
-            M128A Legacy[8];      /* 120 */
-            M128A Xmm0;           /* 1a0 */
-            M128A Xmm1;           /* 1b0 */
-            M128A Xmm2;           /* 1c0 */
-            M128A Xmm3;           /* 1d0 */
-            M128A Xmm4;           /* 1e0 */
-            M128A Xmm5;           /* 1f0 */
-            M128A Xmm6;           /* 200 */
-            M128A Xmm7;           /* 210 */
-            M128A Xmm8;           /* 220 */
-            M128A Xmm9;           /* 230 */
-            M128A Xmm10;          /* 240 */
-            M128A Xmm11;          /* 250 */
-            M128A Xmm12;          /* 260 */
-            M128A Xmm13;          /* 270 */
-            M128A Xmm14;          /* 280 */
-            M128A Xmm15;          /* 290 */
+            qemu_M128A Header[2];      /* 100 */
+            qemu_M128A Legacy[8];      /* 120 */
+            qemu_M128A Xmm0;           /* 1a0 */
+            qemu_M128A Xmm1;           /* 1b0 */
+            qemu_M128A Xmm2;           /* 1c0 */
+            qemu_M128A Xmm3;           /* 1d0 */
+            qemu_M128A Xmm4;           /* 1e0 */
+            qemu_M128A Xmm5;           /* 1f0 */
+            qemu_M128A Xmm6;           /* 200 */
+            qemu_M128A Xmm7;           /* 210 */
+            qemu_M128A Xmm8;           /* 220 */
+            qemu_M128A Xmm9;           /* 230 */
+            qemu_M128A Xmm10;          /* 240 */
+            qemu_M128A Xmm11;          /* 250 */
+            qemu_M128A Xmm12;          /* 260 */
+            qemu_M128A Xmm13;          /* 270 */
+            qemu_M128A Xmm14;          /* 280 */
+            qemu_M128A Xmm15;          /* 290 */
         } DUMMYSTRUCTNAME;
     } DUMMYUNIONNAME;
 
     /* Vector */
-    M128A VectorRegister[26];     /* 300 */
+    qemu_M128A VectorRegister[26];     /* 300 */
     DWORD64 VectorControl;        /* 4a0 */
 
     /* Debug control */
@@ -282,7 +282,7 @@ typedef struct DECLSPEC_ALIGN(16) {
     DWORD64 LastBranchFromRip;    /* 4b8 */
     DWORD64 LastExceptionToRip;   /* 4c0 */
     DWORD64 LastExceptionFromRip; /* 4c8 */
-} CONTEXT_X86_64;
+} qemu_CONTEXT_X86_64;
 
 extern uint64_t guest_exception_handler, guest_call_entry;
 extern BOOL is_32_bit;
