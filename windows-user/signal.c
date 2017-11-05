@@ -42,7 +42,7 @@ static LONG WINAPI exception_handler(EXCEPTION_POINTERS *exception)
     info.si_addr = exception->ExceptionRecord->ExceptionAddress;
 
     memset(&uc, 0, sizeof(uc));
-    uc.uc_mcontext.pc = (unsigned long)exception->ExceptionRecord->ExceptionAddress;
+    // uc.uc_mcontext.pc = (unsigned long)exception->ExceptionRecord->ExceptionAddress;
     /* uc.uc_sigmask = FIXME */
 
     switch (exception->ExceptionRecord->ExceptionCode)
