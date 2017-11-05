@@ -145,6 +145,8 @@ typedef struct TaskState
 
 } __attribute__((aligned(16))) TaskState;
 
+extern unsigned long last_brk;
+
 extern __thread CPUState *thread_cpu;
 
 static inline void *my_alloc(size_t s)
