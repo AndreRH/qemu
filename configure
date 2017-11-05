@@ -251,10 +251,6 @@ supported_target() {
             fi
             ;;
         *-windows-user)
-            if test "$linux" != "yes"; then
-                print_error "Target '$target' is only available on a Linux(!!!) host"
-                return 1
-            fi
             ;;
         *-bsd-user)
             if test "$bsd" != "yes"; then
