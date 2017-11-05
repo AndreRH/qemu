@@ -51,6 +51,7 @@ int have_guest_base;
 unsigned long reserved_va;
 static struct qemu_pe_image image;
 BOOL is_32_bit;
+unsigned long last_brk;
 
 PEB guest_PEB;
 PEB guest_PEB32;
