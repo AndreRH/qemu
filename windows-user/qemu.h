@@ -1,7 +1,7 @@
 #ifndef QEMU_H
 #define QEMU_H
 
-#include <asm-generic/int-ll64.h>
+#include <stdint.h>
 #include <windows.h>
 #include <winternl.h>
 
