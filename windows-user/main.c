@@ -958,7 +958,7 @@ int main(int argc, char **argv, char **envp)
         /* On OSX Wine owns the first 1 GB due to the WINE_DOS segment in the loader binary. It will
          * happily use it for HeapAlloc before we are able to load our .exe file. Block any free space
          * in this area and free it when we're ready to load the guest binary. */
-        for (i = 0; i < 0x40000000 / 0x1000; i++)
+        for (i = 1; i < 0x40000000 / 0x1000; i++)
         {
             if (VirtualAlloc((void *)(ULONG_PTR)(i * 0x1000), 0x1000, MEM_RESERVE, PAGE_NOACCESS))
                 mem_blocked[i] = TRUE;
