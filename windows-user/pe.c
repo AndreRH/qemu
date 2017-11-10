@@ -952,7 +952,14 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     wm->ldr.InInitializationOrderModuleList.Flink = NULL;
     wm->ldr.InInitializationOrderModuleList.Blink = NULL;
 
-    if (!(nt->OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_NX_COMPAT))
+    /* FIXME: This code gets triggered by our DLLs, and it disables NX on the host side.
+     * Both things of that are wrong. Disable it for now, but it needs to be re-enabled
+     * once the DLLs have proper flags and we have page execute permissions integrated in
+     * qemu.
+     *
+     * Setting this on the host side mysteriously breaks creating windows on OSX, with
+     * weird crashes deep inside OSX libraries. */
+    if (0 && !(nt->OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_NX_COMPAT))
     {
         ULONG flags = MEM_EXECUTE_OPTION_ENABLE;
         WINE_WARN( "disabling no-exec because of %s\n", wine_dbgstr_w(wm->ldr.BaseDllName.Buffer) );
