@@ -907,7 +907,11 @@ static void block_address_space(void)
     }
 
     /* It appears that the heap manager has a few pages we can't mmap, but malloc will successfully
-     * allocate from. On my system this gives me about 140kb of memory. */
+     * allocate from. On my system this gives me about 140kb of memory.
+     *
+     * Trying to malloc without virtual memory available hangs on OSX. We can happily skip it there
+     * because the default malloc zone is placed below 4GB anyway. */
+#ifndef __APPLE__
     size = 1UL << 63UL;
     while(size)
     {
@@ -917,6 +921,7 @@ static void block_address_space(void)
         } while(map);
         size >>= 1;
     }
+#endif
 
     /* Same for Wine's heap. */
     size = 1UL << 63UL;
@@ -940,6 +945,7 @@ int main(int argc, char **argv, char **envp)
     unsigned long min_addr;
     FILE *min_file = fopen("/proc/sys/vm/mmap_min_addr", "r");
     void **osx_ptrs = wine_mmap_get_qemu_ptrs();
+    static char mem_blocked[0x40000000 / 0x1000];
 
     /* FIXME: The order of operations is a mess, especially setting up the TEB and loading the
      * guest binary. */
@@ -949,8 +955,17 @@ int main(int argc, char **argv, char **envp)
      * a 32 bit address space. */
     if (osx_ptrs && osx_ptrs[0])
     {
-        low2gb = osx_ptrs[1];
-        low4gb = osx_ptrs[2];
+        /* On OSX Wine owns the first 1 GB due to the WINE_DOS segment in the loader binary. It will
+         * happily use it for HeapAlloc before we are able to load our .exe file. Block any free space
+         * in this area and free it when we're ready to load the guest binary. */
+        for (i = 0; i < 0x40000000 / 0x1000; i++)
+        {
+            if (VirtualAlloc((void *)(ULONG_PTR)(i * 0x1000), 0x1000, MEM_RESERVE, PAGE_NOACCESS))
+                mem_blocked[i] = TRUE;
+        }
+
+        low2gb = osx_ptrs[0];
+        low4gb = osx_ptrs[1];
     }
     else if (min_file && fscanf(min_file, "%lu", &min_addr) == 1)
     {
@@ -1023,8 +1038,6 @@ int main(int argc, char **argv, char **envp)
         ExitProcess(EXIT_FAILURE);
     }
 
-    fprintf(stderr, "Lib load done, doing address space dance\n");
-    Sleep(100000);
     if (is_32_bit)
     {
         RemoveEntryList( &guest_teb->TlsLinks );
@@ -1042,11 +1055,10 @@ int main(int argc, char **argv, char **envp)
         block_address_space();
     }
 
-    /* FIXME: OSX has the pesky attitude to load its libraries at the place where we want to
-     * put our executables. Prevent this by only freeing 2-4GB now, and 0-2GB after loading
-     * msvcrt. This will break apps that aren't large address aware though. */
     if (low4gb)
         munmap(low4gb, 0x80000000); /* FIXME: Only if large address aware. */
+    if (low2gb)
+        munmap(low2gb, 0x80000000 - (ULONG_PTR)low2gb);
 
     if (is_32_bit)
     {
@@ -1066,10 +1078,14 @@ int main(int argc, char **argv, char **envp)
         ExitProcess(EXIT_FAILURE);
     }
 
-    if (low2gb)
-        munmap(low2gb, 0x80000000 - (ULONG_PTR)low2gb);
-    if (osx_ptrs && osx_ptrs[0])
-        munmap(osx_ptrs[0], 0x100000 - (ULONG_PTR)osx_ptrs[0]);
+    if (osx_ptrs)
+    {
+        for (i = 0; i < 0x40000000 / 0x1000; i++)
+        {
+            if (mem_blocked[i])
+                VirtualFree((void *)(ULONG_PTR)(i * 0x1000), 0, MEM_RELEASE);
+        }
+    }
 
     exe_module = qemu_LoadLibrary(filenameW, 0);
     my_free(filenameW);
