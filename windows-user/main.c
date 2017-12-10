@@ -935,52 +935,92 @@ static void block_address_space(void)
     }
 }
 
+static char virtualalloc_blocked[0x100000000 / 0x10000];
+static char mmap_blocked[0x100000000 / 0x1000];
+static BOOL upper2gb;
+
+static void fill_4g_holes(void)
+{
+    unsigned int i;
+
+    /* The upper 2 GB are usually free. Try to allocate it in one go and reduce the loop iterations if possibe. */
+    if (VirtualAlloc((void *)(ULONG_PTR)0x80000000, 0x80000000, MEM_RESERVE, PAGE_NOACCESS))
+        upper2gb = TRUE;
+
+    /* Try to allocate with both VirtualAlloc and mmap.
+     *
+     * The MacOS loader reserves some areas with sections in the main executable. They are not available for
+     * mmap because it might break the Mac dynamic loader, but Wine will happily remap them with VirtualAlloc.
+     *
+     * However, VirtualAlloc can only allocate on a 16kb granularity, so we'd leave some holes around
+     * things that are already mapped, like ntdll. Those holes would be filled by the address space blocking code
+     * later. Fill them with mmap and free them after the blocking code.
+     *
+     * FIXME: This process is quite slow, especially the mmap part. See if there are ways to speed it up. */
+    for (i = 1; i < ARRAY_SIZE(virtualalloc_blocked); i++)
+    {
+        if (upper2gb && (i * 0x10000) >= 0x80000000)
+            break;
+
+        if (VirtualAlloc((void *)(ULONG_PTR)(i * 0x10000), 0x10000, MEM_RESERVE, PAGE_NOACCESS))
+            virtualalloc_blocked[i] = TRUE;
+    }
+
+    for (i = 1; i < ARRAY_SIZE(mmap_blocked); i++)
+    {
+        void *addr;
+
+        if (upper2gb && (i * 0x1000) >= 0x80000000)
+            break;
+
+        addr = mmap((void *)(ULONG_PTR)(i * 0x1000), 0x1000,
+                PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+
+        if (addr == (void *)(ULONG_PTR)(i * 0x1000))
+            mmap_blocked[i] = TRUE;
+        else if (addr != (void *)0xffffffffffffffff)
+            munmap(addr, 0x1000);
+    }
+}
+
+static void free_4g_holes(void)
+{
+    unsigned int i;
+
+    /* FIXME: Only free the upper 2 GB if the .exe file is large address aware. */
+    if (upper2gb)
+        VirtualFree((void *)(ULONG_PTR)0x80000000, 0, MEM_RELEASE);
+
+    for (i = 0; i < ARRAY_SIZE(virtualalloc_blocked); i++)
+    {
+        if (upper2gb && (i * 0x10000) >= 0x80000000)
+            break;
+
+        if (virtualalloc_blocked[i])
+            VirtualFree((void *)(ULONG_PTR)(i * 0x10000), 0, MEM_RELEASE);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(mmap_blocked); i++)
+    {
+        if (upper2gb && (i * 0x1000) >= 0x80000000)
+            break;
+
+        if (mmap_blocked[i])
+            munmap((void *)(ULONG_PTR)(i * 0x1000), 0x1000);
+    }
+}
+
 int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module, shlwapi_module;
     int optind, i;
     WCHAR *filenameW;
     int ret;
-    void *low2gb = NULL, *low4gb = NULL;
-    unsigned long min_addr;
-    FILE *min_file = fopen("/proc/sys/vm/mmap_min_addr", "r");
-    void **osx_ptrs = wine_mmap_get_qemu_ptrs();
-    static char mem_blocked[0x40000000 / 0x1000];
 
     /* FIXME: The order of operations is a mess, especially setting up the TEB and loading the
      * guest binary. */
 
-    /* Try to block the low 4 GB. We will free it later. If we're running a 32 bit program, we
-     * will block the entire address space before freeing the low 4 GB to force allocations into
-     * a 32 bit address space. */
-    if (osx_ptrs && osx_ptrs[0])
-    {
-        /* On OSX Wine owns the first 1 GB due to the WINE_DOS segment in the loader binary. It will
-         * happily use it for HeapAlloc before we are able to load our .exe file. Block any free space
-         * in this area and free it when we're ready to load the guest binary. */
-        for (i = 1; i < 0x40000000 / 0x1000; i++)
-        {
-            if (VirtualAlloc((void *)(ULONG_PTR)(i * 0x1000), 0x1000, MEM_RESERVE, PAGE_NOACCESS))
-                mem_blocked[i] = TRUE;
-        }
-
-        low2gb = osx_ptrs[0];
-        low4gb = osx_ptrs[1];
-    }
-    else if (min_file && fscanf(min_file, "%lu", &min_addr) == 1)
-    {
-        low2gb = mmap((void *)min_addr, 0x80000000 - min_addr, PROT_NONE,
-                MAP_FIXED | MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-        low4gb = mmap((void *)0x80000000, 0x80000000, PROT_NONE,
-                MAP_FIXED | MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
-    }
-    else
-    {
-        fprintf(stderr, "Cannot read mmap_min_addr, 32 bit programs will fail.\n");
-    }
-
-    if (min_file)
-        fclose(min_file);
+    fill_4g_holes();
 
     parallel_cpus = true;
 
@@ -1046,19 +1086,17 @@ int main(int argc, char **argv, char **envp)
         my_free(process_params.CommandLine.Buffer);
         memset(&process_params, 0, sizeof(process_params));
 
-        if (!low2gb || !low4gb)
+        if ((ULONG_PTR)&i >= 0x100000000)
         {
-            fprintf(stderr, "Failed to reserve low 4 GB, cannot set up address space for Win32.\n");
-            ExitProcess(EXIT_FAILURE);
+            /* This will cause troubles whenever a callback function receives a pointer to a variable on the stack. */
+            fprintf(stderr, "The host stack is above 4GB. This will likely cause isues.\n");
+            /* Make sure the stack has some room before we block the address space above 4 GB. */
+            growstack();
         }
-        growstack();
         block_address_space();
     }
 
-    if (low4gb)
-        munmap(low4gb, 0x80000000); /* FIXME: Only if large address aware. */
-    if (low2gb)
-        munmap(low2gb, 0x80000000 - (ULONG_PTR)low2gb);
+    free_4g_holes();
 
     if (is_32_bit)
     {
@@ -1076,15 +1114,6 @@ int main(int argc, char **argv, char **envp)
     {
         fprintf(stderr, "Failed to load host DLLs\n");
         ExitProcess(EXIT_FAILURE);
-    }
-
-    if (osx_ptrs)
-    {
-        for (i = 0; i < 0x40000000 / 0x1000; i++)
-        {
-            if (mem_blocked[i])
-                VirtualFree((void *)(ULONG_PTR)(i * 0x1000), 0, MEM_RELEASE);
-        }
     }
 
     exe_module = qemu_LoadLibrary(filenameW, 0);
