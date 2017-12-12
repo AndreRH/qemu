@@ -983,28 +983,45 @@ static void fill_4g_holes(void)
     }
 }
 
-static void free_4g_holes(void)
+static void free_4g_holes(BOOL free_low_2_gb)
 {
-    unsigned int i;
+    unsigned int i, start, end;
 
-    /* FIXME: Only free the upper 2 GB if the .exe file is large address aware. */
-    if (upper2gb)
-        VirtualFree((void *)(ULONG_PTR)0x80000000, 0, MEM_RELEASE);
-
-    for (i = 0; i < ARRAY_SIZE(virtualalloc_blocked); i++)
+    if (free_low_2_gb)
     {
-        if (upper2gb && (i * 0x10000) >= 0x80000000)
-            break;
+        start = 0;
+        end = ARRAY_SIZE(virtualalloc_blocked) / 2;
+    }
+    else if (upper2gb)
+    {
+        VirtualFree((void *)(ULONG_PTR)0x80000000, 0, MEM_RELEASE);
+        start = end = 0;
+    }
+    else
+    {
+        start = ARRAY_SIZE(virtualalloc_blocked) / 2;
+        end = ARRAY_SIZE(virtualalloc_blocked);
+    }
 
+    for (i = start; i < end; i++)
+    {
         if (virtualalloc_blocked[i])
             VirtualFree((void *)(ULONG_PTR)(i * 0x10000), 0, MEM_RELEASE);
     }
 
-    for (i = 0; i < ARRAY_SIZE(mmap_blocked); i++)
+    if (free_low_2_gb)
     {
-        if (upper2gb && (i * 0x1000) >= 0x80000000)
-            break;
+        start = 0;
+        end = ARRAY_SIZE(mmap_blocked) / 2;
+    }
+    else if (!upper2gb)
+    {
+        start = ARRAY_SIZE(mmap_blocked) / 2;
+        end = ARRAY_SIZE(mmap_blocked);
+    }
 
+    for (i = start; i < end; i++)
+    {
         if (mmap_blocked[i])
             munmap((void *)(ULONG_PTR)(i * 0x1000), 0x1000);
     }
@@ -1096,7 +1113,7 @@ int main(int argc, char **argv, char **envp)
         block_address_space();
     }
 
-    free_4g_holes();
+    free_4g_holes(FALSE);
 
     if (is_32_bit)
     {
@@ -1110,11 +1127,7 @@ int main(int argc, char **argv, char **envp)
         fprintf(stderr, "32 bit environment set up\n");
     }
 
-    if (!load_host_dlls(TRUE))
-    {
-        fprintf(stderr, "Failed to load host DLLs\n");
-        ExitProcess(EXIT_FAILURE);
-    }
+    free_4g_holes(TRUE);
 
     exe_module = qemu_LoadLibrary(filenameW, 0);
     my_free(filenameW);
@@ -1125,6 +1138,12 @@ int main(int argc, char **argv, char **envp)
     }
     qemu_get_image_info(exe_module, &image);
     guest_PEB.ImageBaseAddress = exe_module;
+
+    if (!load_host_dlls(TRUE))
+    {
+        fprintf(stderr, "Failed to load host DLLs\n");
+        ExitProcess(EXIT_FAILURE);
+    }
 
     if (image.stack_reserve != DEFAULT_STACK_SIZE)
     {
