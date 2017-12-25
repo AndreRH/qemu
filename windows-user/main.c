@@ -1119,8 +1119,15 @@ int main(int argc, char **argv, char **envp)
     {
         /* Re-init the CPU with (hopefully) 32 bit pointers. */
 
-        /* Need a heap handle < 2^32. Hopefully we don't free old allocs :-) */
-        NtCurrentTeb()->Peb->ProcessHeap = HeapCreate(HEAP_GROWABLE, 0, 0);
+        /* Need a heap handle < 2^32. */
+        if ((ULONG_PTR)NtCurrentTeb()->Peb->ProcessHeap >= (1ULL << 32ULL))
+        {
+            /* This will make HeapFree on existing allocs fail (not much of an issue),
+             * but it will also make HeapReAlloc calls fail, which causes crashes in the
+             * font code. */
+            fprintf(stderr, "Warning: Swapping process heap. This can cause problems.\n");
+            NtCurrentTeb()->Peb->ProcessHeap = HeapCreate(HEAP_GROWABLE, 0, 0);
+        }
 
         init_process_params(argv + optind, filename);
         init_thread_cpu();
