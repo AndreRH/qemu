@@ -207,6 +207,14 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 #define TRAP_sig(context)     ((context)->uc_mcontext.mc_trapno)
 #define ERROR_sig(context)    ((context)->uc_mcontext.mc_err)
 #define MASK_sig(context)     ((context)->uc_sigmask)
+#elif defined(WIN32)
+#include <windows.h>
+#define PC_sig(context)       (context->ContextRecord->Rip)
+/* FIXME: Trick these things into somehow making the 2nd parameter is_write. */
+#define TRAP_sig(context)     (0)
+#define ERROR_sig(context)    (0)
+static sigset_t dummy;
+#define MASK_sig(context)     (dummy)
 #else
 #define PC_sig(context)       ((context)->uc_mcontext.gregs[REG_RIP])
 #define TRAP_sig(context)     ((context)->uc_mcontext.gregs[REG_TRAPNO])
@@ -217,10 +225,11 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 int cpu_signal_handler(int host_signum, void *pinfo,
                        void *puc)
 {
-#if 0
     siginfo_t *info = pinfo;
     unsigned long pc;
-#if defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
+#if defined(WIN32)
+    EXCEPTION_POINTERS *uc = puc;
+#elif defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
     ucontext_t *uc = puc;
 #elif defined(__OpenBSD__)
     struct sigcontext *uc = puc;
@@ -233,8 +242,6 @@ int cpu_signal_handler(int host_signum, void *pinfo,
                              TRAP_sig(uc) == 0xe ?
                              (ERROR_sig(uc) >> 1) & 1 : 0,
                              &MASK_sig(uc));
-#endif
-    return 0;
 }
 
 #elif defined(_ARCH_PPC)
@@ -438,11 +445,21 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 
 #elif defined(__aarch64__)
 
+#if defined(WIN32)
+#include <windows.h>
+#endif
+
 int cpu_signal_handler(int host_signum, void *pinfo, void *puc)
 {
     siginfo_t *info = pinfo;
+#if defined(WIN32)
+    EXCEPTION_POINTERS *uc = puc;
+    uintptr_t pc = uc->ContextRecord->Pc;
+    unsigned long dummy = 0xdeadbeef;
+#else
     ucontext_t *uc = puc;
     uintptr_t pc = uc->uc_mcontext.pc;
+#endif
     uint32_t insn = *(uint32_t *)pc;
     bool is_write;
 
@@ -461,7 +478,7 @@ int cpu_signal_handler(int host_signum, void *pinfo, void *puc)
                 || (insn & 0x3a400000) == 0x28000000); /* C3.3.7,14-16 */
 
     return handle_cpu_signal(pc, (uintptr_t)info->si_addr,
-                             is_write, &uc->uc_sigmask);
+                             is_write, (sigset_t *)&dummy);
 }
 
 #elif defined(__s390__)
