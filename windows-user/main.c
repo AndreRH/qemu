@@ -380,6 +380,7 @@ static void cpu_loop(const void *code)
     EXCEPTION_POINTERS except;
     EXCEPTION_RECORD exception_record;
     qemu_CONTEXT_X86_64 guest_context;
+    TEB *teb = NtCurrentTeb();
 
     cs = thread_cpu;
     env = cs->env_ptr;
@@ -399,7 +400,26 @@ static void cpu_loop(const void *code)
                 syscall = g2h(env->regs[R_ECX]);
                 if (!syscall) /* Return from guest to host. */
                     return;
-                do_syscall(syscall);
+
+                /* Making SetLastError / GetLastError call out of the VM is
+                 * slow and doesn't work with inlined code. Hooking SetLastError
+                 * in theory allows us to replace it with something that updates
+                 * the host and guest TEB, but fails if SetLastError is inlined
+                 * in the Wine libraries as it should (but somehow on arm64 it
+                 * is not inlined). So do the other quite expensive thing and
+                 * copy the values on every syscall. */
+                if (is_32_bit)
+                {
+                    teb->LastErrorValue = guest_teb32->LastErrorValue;
+                    do_syscall(syscall);
+                    guest_teb32->LastErrorValue = teb->LastErrorValue;
+                }
+                else
+                {
+                    teb->LastErrorValue = guest_teb->LastErrorValue;
+                    do_syscall(syscall);
+                    guest_teb->LastErrorValue = teb->LastErrorValue;
+                }
                 continue;
 
             case EXCP0E_PAGE:
