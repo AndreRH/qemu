@@ -436,6 +436,13 @@ static void cpu_loop(const void *code)
 
                 cpu_env_to_context(&guest_context, env);
 
+                if (env->eip == guest_exception_handler)
+                {
+                    fprintf(stderr, "Failure on first exception handler instruction, terminating.\n");
+                    cpu_dump_state(cs, stderr, fprintf, 0);
+                    ExitProcess(1);
+                }
+
                 fprintf(stderr, "Got a page fault in user code, resuming execution at exception handler 0x%lx, rsp %p.\n",
                         guest_exception_handler, (void *)env->regs[R_ESP]);
                 cpu_dump_state(cs, stderr, fprintf, 0);
@@ -519,6 +526,7 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
     {
         qemu_log("Initializing new CPU for thread %x.\n", GetCurrentThreadId());
         rcu_register_thread();
+        tcg_register_thread();
         init_thread_cpu();
         cs = thread_cpu;
         MODULE_DllThreadAttach(NULL);
