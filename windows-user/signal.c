@@ -28,7 +28,6 @@ static LONG WINAPI exception_handler(EXCEPTION_POINTERS *exception)
     CPUX86State *env = thread_cpu->env_ptr;
     CPUState *cpu = ENV_GET_CPU(env);
     siginfo_t info;
-    ucontext_t uc;
 
     if (!cpu || !cpu->running)
     {
@@ -41,14 +40,10 @@ static LONG WINAPI exception_handler(EXCEPTION_POINTERS *exception)
     memset(&info, 0, sizeof(info));
     info.si_addr = exception->ExceptionRecord->ExceptionAddress;
 
-    memset(&uc, 0, sizeof(uc));
-    // uc.uc_mcontext.pc = (unsigned long)exception->ExceptionRecord->ExceptionAddress;
-    /* uc.uc_sigmask = FIXME */
-
     switch (exception->ExceptionRecord->ExceptionCode)
     {
         case EXCEPTION_ACCESS_VIOLATION:
-            cpu_signal_handler(SIGSEGV, &info, &uc);
+            cpu_signal_handler(SIGSEGV, &info, exception);
             fprintf(stderr, "Did not expect cpu_signal_handler to return.\n");
 
         default:
