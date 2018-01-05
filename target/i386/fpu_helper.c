@@ -957,9 +957,10 @@ void helper_fxam_ST0(CPUX86State *env)
         env->fpus |= 0x200; /* C1 <-- 1 */
     }
 
-    /* XXX: test fptags too */
     expdif = EXPD(temp);
-    if (expdif == MAXEXPD) {
+    if (env->fptags[0]) {
+        env->fpus |= 0x4100; /* Empty */
+    } else if (expdif == MAXEXPD) {
         if (MANTD(temp) == 0x8000000000000000ULL) {
             env->fpus |= 0x500; /* Infinity */
         } else {
