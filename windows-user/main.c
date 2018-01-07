@@ -231,8 +231,10 @@ static void init_thread_cpu(void)
     /* Stack grows down, so point to the end of the allocation. */
     env->regs[R_ESP] = h2g(stack) + stack_reserve;
 
+    /* FIXME: Something here does not make sense for 32 bit. set_idt should behave differently,
+     * and probably a few other things. */
     env->idt.limit = is_32_bit ? 255 : 511;
-    idt_table = my_alloc(sizeof(uint64_t) * (env->idt.limit + 1));
+    idt_table = my_alloc(sizeof(uint64_t) * (511 + 1));
     env->idt.base = h2g(idt_table);
     set_idt(0, 0);
     set_idt(1, 0);
