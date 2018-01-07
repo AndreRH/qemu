@@ -70,7 +70,7 @@ BOOL load_host_dlls(BOOL load_msvcrt)
     WIN32_FIND_DATAA find_data;
     HANDLE find_handle;
     struct load_host_dlls *new_ptr;
-    char path[MAX_PATH];
+    char path[MAX_PATH + 30];
 
     if (!dlls)
     {
