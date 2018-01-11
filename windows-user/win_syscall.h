@@ -24,21 +24,33 @@ typedef struct _NT_TIB32
 	qemu_ptr Self;
 } NT_TIB32, *PNT_TIB32;
 
+typedef struct _UNICODE_STRING32 {
+  USHORT Length;        /* bytes */
+  USHORT MaximumLength; /* bytes */
+  qemu_ptr Buffer;
+} UNICODE_STRING32, *PUNICODE_STRING32;
+
+typedef struct _CLIENT_ID32
+{
+   qemu_handle UniqueProcess;
+   qemu_handle UniqueThread;
+} CLIENT_ID32, *PCLIENT_ID32;
+
 /***********************************************************************
  * TEB data structure
  */
 typedef struct _TEB32
 {                                                                 /* win32/win64 */
     NT_TIB32                     Tib;                               /* 000/0000 */
-    qemu_ptr                        EnvironmentPointer;                /* 01c/0038 */
-    CLIENT_ID                    ClientId;                          /* 020/0040 */
-    qemu_ptr                        ActiveRpcHandle;                   /* 028/0050 */
-    qemu_ptr                        ThreadLocalStoragePointer;         /* 02c/0058 */
-    qemu_ptr                         Peb;                               /* 030/0060 */
+    qemu_ptr                     EnvironmentPointer;                /* 01c/0038 */
+    CLIENT_ID32                  ClientId;                          /* 020/0040 */
+    qemu_ptr                     ActiveRpcHandle;                   /* 028/0050 */
+    qemu_ptr                     ThreadLocalStoragePointer;         /* 02c/0058 */
+    qemu_ptr                     Peb;                               /* 030/0060 */
     ULONG                        LastErrorValue;                    /* 034/0068 */
     ULONG                        CountOfOwnedCriticalSections;      /* 038/006c */
-    qemu_ptr                        CsrClientThread;                   /* 03c/0070 */
-    qemu_ptr                        Win32ThreadInfo;                   /* 040/0078 */
+    qemu_ptr                     CsrClientThread;                   /* 03c/0070 */
+    qemu_ptr                     Win32ThreadInfo;                   /* 040/0078 */
     ULONG                        Win32ClientInfo[31];               /* 044/0080 used for user32 private data in Wine */
     qemu_ptr                        WOW32Reserved;                     /* 0c0/0100 */
     ULONG                        CurrentLocale;                     /* 0c4/0108 */
@@ -67,7 +79,7 @@ typedef struct _TEB32
     qemu_ptr                        glCurrentRC;                       /* bec/1240 */
     qemu_ptr                        glContext;                         /* bf0/1248 */
     ULONG                        LastStatusValue;                   /* bf4/1250 */
-    UNICODE_STRING               StaticUnicodeString;               /* bf8/1258 used by advapi32 */
+    UNICODE_STRING32             StaticUnicodeString;               /* bf8/1258 used by advapi32 */
     WCHAR                        StaticUnicodeBuffer[261];          /* c00/1268 used by advapi32 */
     qemu_ptr                        DeallocationStack;                 /* e0c/1478 */
     qemu_ptr                        TlsSlots[64];                      /* e10/1480 */
@@ -95,5 +107,120 @@ typedef struct _TEB32
     qemu_ptr                        ActiveFrame;                       /* fb0/17b0 */
     qemu_ptr                       FlsSlots;                          /* fb4/17c8 */
 } TEB32, *PTEB32;
+
+typedef struct _CURDIR32
+{
+    UNICODE_STRING32 DosPath;
+    qemu_ptr Handle;
+} CURDIR32, *PCURDIR32;
+
+typedef struct _RTL_USER_PROCESS_PARAMETERS32
+{
+    ULONG               AllocationSize;
+    ULONG               Size;
+    ULONG               Flags;
+    ULONG               DebugFlags;
+    qemu_handle         ConsoleHandle;
+    ULONG               ConsoleFlags;
+    qemu_handle         hStdInput;
+    qemu_handle         hStdOutput;
+    qemu_handle         hStdError;
+    CURDIR32            CurrentDirectory;
+    UNICODE_STRING32    DllPath;
+    UNICODE_STRING32    ImagePathName;
+    UNICODE_STRING32    CommandLine;
+    qemu_ptr            Environment;
+    ULONG               dwX;
+    ULONG               dwY;
+    ULONG               dwXSize;
+    ULONG               dwYSize;
+    ULONG               dwXCountChars;
+    ULONG               dwYCountChars;
+    ULONG               dwFillAttribute;
+    ULONG               dwFlags;
+    ULONG               wShowWindow;
+    UNICODE_STRING32    WindowTitle;
+    UNICODE_STRING32    Desktop;
+    UNICODE_STRING32    ShellInfo;
+    UNICODE_STRING32    RuntimeInfo;
+    RTL_DRIVE_LETTER_CURDIR DLCurrentDirectory[0x20];
+} RTL_USER_PROCESS_PARAMETERS32, *PRTL_USER_PROCESS_PARAMETERS32;
+
+typedef struct _PEB32
+{                                                                 /* win32/win64 */
+    BOOLEAN                      InheritedAddressSpace;             /* 000/000 */
+    BOOLEAN                      ReadImageFileExecOptions;          /* 001/001 */
+    BOOLEAN                      BeingDebugged;                     /* 002/002 */
+    BOOLEAN                      SpareBool;                         /* 003/003 */
+    qemu_handle                  Mutant;                            /* 004/008 */
+    qemu_handle                  ImageBaseAddress;                  /* 008/010 */
+    qemu_ptr                     LdrData;                           /* 00c/018 */
+    qemu_ptr                     ProcessParameters;                 /* 010/020 */
+    qemu_ptr                     SubSystemData;                     /* 014/028 */
+    qemu_handle                  ProcessHeap;                       /* 018/030 */
+    qemu_ptr                     FastPebLock;                       /* 01c/038 */
+    qemu_ptr                     FastPebLockRoutine;                /* 020/040 */
+    qemu_ptr                     FastPebUnlockRoutine;              /* 024/048 */
+    ULONG                        EnvironmentUpdateCount;            /* 028/050 */
+    qemu_ptr                     KernelCallbackTable;               /* 02c/058 */
+    ULONG                        Reserved[2];                       /* 030/060 */
+    qemu_ptr                     FreeList;                          /* 038/068 */
+    ULONG                        TlsExpansionCounter;               /* 03c/070 */
+    qemu_ptr                     TlsBitmap;                         /* 040/078 */
+    ULONG                        TlsBitmapBits[2];                  /* 044/080 */
+    qemu_ptr                     ReadOnlySharedMemoryBase;          /* 04c/088 */
+    qemu_ptr                     ReadOnlySharedMemoryHeap;          /* 050/090 */
+    qemu_ptr                     ReadOnlyStaticServerData;          /* 054/098 */
+    qemu_ptr                     AnsiCodePageData;                  /* 058/0a0 */
+    qemu_ptr                     OemCodePageData;                   /* 05c/0a8 */
+    qemu_ptr                     UnicodeCaseTableData;              /* 060/0b0 */
+    ULONG                        NumberOfProcessors;                /* 064/0b8 */
+    ULONG                        NtGlobalFlag;                      /* 068/0bc */
+    LARGE_INTEGER                CriticalSectionTimeout;            /* 070/0c0 */
+    qemu_handle                  HeapSegmentReserve;                /* 078/0c8 */
+    qemu_handle                  HeapSegmentCommit;                 /* 07c/0d0 */
+    qemu_handle                  HeapDeCommitTotalFreeThreshold;    /* 080/0d8 */
+    qemu_handle                  HeapDeCommitFreeBlockThreshold;    /* 084/0e0 */
+    ULONG                        NumberOfHeaps;                     /* 088/0e8 */
+    ULONG                        MaximumNumberOfHeaps;              /* 08c/0ec */
+    qemu_ptr                     ProcessHeaps;                      /* 090/0f0 */
+    qemu_ptr                     GdiSharedHandleTable;              /* 094/0f8 */
+    qemu_ptr                     ProcessStarterHelper;              /* 098/100 */
+    qemu_ptr                     GdiDCAttributeList;                /* 09c/108 */
+    qemu_ptr                     LoaderLock;                        /* 0a0/110 */
+    ULONG                        OSMajorVersion;                    /* 0a4/118 */
+    ULONG                        OSMinorVersion;                    /* 0a8/11c */
+    ULONG                        OSBuildNumber;                     /* 0ac/120 */
+    ULONG                        OSPlatformId;                      /* 0b0/124 */
+    ULONG                        ImageSubSystem;                    /* 0b4/128 */
+    ULONG                        ImageSubSystemMajorVersion;        /* 0b8/12c */
+    ULONG                        ImageSubSystemMinorVersion;        /* 0bc/130 */
+    ULONG                        ImageProcessAffinityMask;          /* 0c0/134 */
+    qemu_handle                  GdiHandleBuffer[28];               /* 0c4/138 */
+    ULONG                        unknown[6];                        /* 134/218 */
+    qemu_ptr                     PostProcessInitRoutine;            /* 14c/230 */
+    qemu_ptr                     TlsExpansionBitmap;                /* 150/238 */
+    ULONG                        TlsExpansionBitmapBits[32];        /* 154/240 */
+    ULONG                        SessionId;                         /* 1d4/2c0 */
+    ULARGE_INTEGER               AppCompatFlags;                    /* 1d8/2c8 */
+    ULARGE_INTEGER               AppCompatFlagsUser;                /* 1e0/2d0 */
+    qemu_ptr                     ShimData;                          /* 1e8/2d8 */
+    qemu_ptr                     AppCompatInfo;                     /* 1ec/2e0 */
+    UNICODE_STRING32             CSDVersion;                        /* 1f0/2e8 */
+    qemu_ptr                     ActivationContextData;             /* 1f8/2f8 */
+    qemu_ptr                     ProcessAssemblyStorageMap;         /* 1fc/300 */
+    qemu_ptr                     SystemDefaultActivationData;       /* 200/308 */
+    qemu_ptr                     SystemAssemblyStorageMap;          /* 204/310 */
+    qemu_handle                  MinimumStackCommit;                /* 208/318 */
+    qemu_ptr                     FlsCallback;                       /* 20c/320 */
+    LIST_ENTRY                   FlsListHead;                       /* 210/328 */
+    qemu_ptr                     FlsBitmap;                         /* 218/338 */
+    ULONG                        FlsBitmapBits[4];                  /* 21c/340 */
+} PEB32, *PPEB32;
+
+typedef struct tagRTL_BITMAP32 {
+    ULONG       SizeOfBitMap; /* Number of bits in the bitmap */
+    qemu_ptr    Buffer; /* Bitmap data, assumed sized to a DWORD boundary */
+} RTL_BITMAP32, *PRTL_BITMAP32;
 
 #endif
