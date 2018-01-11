@@ -54,9 +54,10 @@ BOOL is_32_bit;
 unsigned long last_brk;
 
 PEB guest_PEB;
-PEB guest_PEB32;
+PEB32 *guest_PEB32;
 static PEB_LDR_DATA guest_ldr;
 static RTL_USER_PROCESS_PARAMETERS process_params;
+static RTL_USER_PROCESS_PARAMETERS32 *process_params32;
 static RTL_BITMAP guest_tls_bitmap;
 static RTL_BITMAP guest_tls_expansion_bitmap;
 static RTL_BITMAP guest_fls_bitmap;
@@ -161,7 +162,7 @@ static TEB *alloc_teb(TEB32 **teb32)
 
         ret32->Tib.Self = (qemu_ptr)(ULONG_PTR)&ret32->Tib;
         ret32->Tib.ExceptionList = ~0U;
-        ret32->Peb = (qemu_ptr)(ULONG_PTR)&guest_PEB32;
+        ret32->Peb = (qemu_ptr)(ULONG_PTR)guest_PEB32;
     }
 
     *teb32 = ret32;
@@ -911,6 +912,35 @@ static void init_process_params(char **argv, const char *filenme)
     InitializeListHead( &guest_ldr.InInitializationOrderModuleList );
 
     guest_PEB.ProcessParameters->CurrentDirectory = NtCurrentTeb()->Peb->ProcessParameters->CurrentDirectory;
+
+    if (is_32_bit)
+    {
+        guest_PEB32 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*guest_PEB32));
+        process_params32 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*process_params32));
+
+        guest_PEB32->ProcessParameters = (ULONG_PTR)process_params32;
+        /* TODO: Loader data? Will be tricky as I have to make pe.c update 32 bit pointers. */
+
+        /* FIXME: This may be broken if we're taking it from Wine's PEB. */
+        process_params32->WindowTitle.Length = guest_PEB.ProcessParameters->WindowTitle.Length;
+        process_params32->WindowTitle.MaximumLength = guest_PEB.ProcessParameters->WindowTitle.MaximumLength;
+        process_params32->WindowTitle.Buffer = (ULONG_PTR)guest_PEB.ProcessParameters->WindowTitle.Buffer;
+
+        process_params32->ImagePathName.Length = guest_PEB.ProcessParameters->ImagePathName.Length;
+        process_params32->ImagePathName.MaximumLength = guest_PEB.ProcessParameters->ImagePathName.MaximumLength;
+        process_params32->ImagePathName.Buffer = (ULONG_PTR)guest_PEB.ProcessParameters->ImagePathName.Buffer;
+
+        /* TODO: Bitmaps. Needs to be mirrored in kernel32 functions too */
+
+        process_params32->CurrentDirectory.Handle = (ULONG_PTR)guest_PEB.ProcessParameters->CurrentDirectory.Handle;
+        process_params32->CurrentDirectory.DosPath.Length = guest_PEB.ProcessParameters->CurrentDirectory.DosPath.Length;
+        process_params32->CurrentDirectory.DosPath.MaximumLength = guest_PEB.ProcessParameters->CurrentDirectory.DosPath.MaximumLength;
+        process_params32->CurrentDirectory.DosPath.Buffer = (ULONG_PTR)my_alloc(process_params32->CurrentDirectory.DosPath.Length);
+
+        memcpy((void *)(ULONG_PTR)process_params32->CurrentDirectory.DosPath.Buffer,
+                guest_PEB.ProcessParameters->CurrentDirectory.DosPath.Buffer,
+                guest_PEB.ProcessParameters->CurrentDirectory.DosPath.MaximumLength);
+    }
 }
 
 /* After blocking the 64 bit address space the host stack has no room to grow. Reserve some
