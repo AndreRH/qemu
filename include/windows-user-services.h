@@ -25,6 +25,14 @@ static inline void qemu_syscall(struct qemu_syscall *call)
 
 #define QEMU_SYSCALL_ID(a) ((QEMU_CURRENT_DLL << 32ULL) | (a))
 
+static inline uint64_t guest_HANDLE_g2h(HANDLE h)
+{
+    if (h == INVALID_HANDLE_VALUE)
+        return (LONG_PTR)h;
+    else
+        return (ULONG_PTR)h;
+}
+
 #ifndef QEMU_DLL_GUEST
 
 struct qemu_ops
