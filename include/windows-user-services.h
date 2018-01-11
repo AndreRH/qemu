@@ -66,6 +66,26 @@ typedef struct _CLIENT_ID32
    qemu_handle UniqueThread;
 } CLIENT_ID32, *PCLIENT_ID32;
 
+typedef struct _LIST_ENTRY32 {
+  qemu_ptr Flink;
+  qemu_ptr Blink;
+} LIST_ENTRY32, *PLIST_ENTRY32, * RESTRICTED_POINTER PRLIST_ENTRY32;
+
+typedef struct _ACTIVATION_CONTEXT_STACK32
+{
+    ULONG                               Flags;
+    ULONG                               NextCookieSequenceNumber;
+    qemu_ptr ActiveFrame;
+    LIST_ENTRY32                          FrameListCache;
+} ACTIVATION_CONTEXT_STACK32, *PACTIVATION_CONTEXT_STACK32;
+
+typedef struct _GDI_TEB_BATCH32
+{
+    ULONG  Offset;
+    qemu_handle HDC;
+    ULONG  Buffer[0x136];
+} GDI_TEB_BATCH32;
+
 /***********************************************************************
  * TEB data structure
  */
@@ -87,14 +107,14 @@ typedef struct _TEB32
     ULONG                        FpSoftwareStatusRegister;          /* 0c8/010c */
     qemu_ptr                        SystemReserved1[54];               /* 0cc/0110 used for kernel32 private data in Wine */
     LONG                         ExceptionCode;                     /* 1a4/02c0 */
-    ACTIVATION_CONTEXT_STACK     ActivationContextStack;            /* 1a8/02c8 */
+    ACTIVATION_CONTEXT_STACK32     ActivationContextStack;            /* 1a8/02c8 */
     BYTE                         SpareBytes1[24];                   /* 1bc/02e8 */
     qemu_ptr                        SystemReserved2[10];               /* 1d4/0300 used for ntdll platform-specific private data in Wine */
-    GDI_TEB_BATCH                GdiTebBatch;                       /* 1fc/0350 used for ntdll private data in Wine */
+    GDI_TEB_BATCH32                GdiTebBatch;                       /* 1fc/0350 used for ntdll private data in Wine */
     qemu_handle                       gdiRgn;                            /* 6dc/0838 */
     qemu_handle                       gdiPen;                            /* 6e0/0840 */
     qemu_handle                       gdiBrush;                          /* 6e4/0848 */
-    CLIENT_ID                    RealClientId;                      /* 6e8/0850 */
+    CLIENT_ID32                    RealClientId;                      /* 6e8/0850 */
     qemu_handle                       GdiCachedProcessHandle;            /* 6f0/0860 */
     ULONG                        GdiClientPID;                      /* 6f4/0868 */
     ULONG                        GdiClientTID;                      /* 6f8/086c */
@@ -113,7 +133,7 @@ typedef struct _TEB32
     WCHAR                        StaticUnicodeBuffer[261];          /* c00/1268 used by advapi32 */
     qemu_ptr                        DeallocationStack;                 /* e0c/1478 */
     qemu_ptr                        TlsSlots[64];                      /* e10/1480 */
-    LIST_ENTRY                   TlsLinks;                          /* f10/1680 */
+    LIST_ENTRY32                   TlsLinks;                          /* f10/1680 */
     qemu_ptr                        Vdm;                               /* f18/1690 */
     qemu_ptr                        ReservedForNtRpc;                  /* f1c/1698 */
     qemu_ptr                        DbgSsReserved[2];                  /* f20/16a0 */
