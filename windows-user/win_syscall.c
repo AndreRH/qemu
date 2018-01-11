@@ -52,6 +52,7 @@ static const struct qemu_ops ops =
     qemu_GetModuleHandleEx,
     qemu_GetProcAddress,
     (void *)qemu_getTEB, /* Cast for (TEB *) -> (void *) */
+    qemu_getTEB32, /* Cast for (TEB32 *) -> (void *) */
     qemu_LoadLibrary,
     qemu_set_except_handler,
     qemu_set_call_entry,
