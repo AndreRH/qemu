@@ -51,8 +51,8 @@
 #include "trace/control.h"
 #include "glib-compat.h"
 
-#include "pe.h"
 #include "win_syscall.h"
+#include "pe.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(qemu_module);
 

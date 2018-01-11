@@ -39,8 +39,8 @@
 #include "trace/control.h"
 #include "glib-compat.h"
 
-#include "pe.h"
 #include "win_syscall.h"
+#include "pe.h"
 
 char *exec_path;
 
@@ -172,6 +172,11 @@ static TEB *alloc_teb(TEB32 **teb32)
 TEB *qemu_getTEB(void)
 {
     return guest_teb;
+}
+
+TEB32 *qemu_getTEB32(void)
+{
+    return guest_teb32;
 }
 
 static void init_thread_cpu(void)

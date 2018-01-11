@@ -15,6 +15,7 @@ void *qemu_RtlPcToFileHeader(void *pc, void **address);
 BOOL qemu_is_32_bit_exe(const WCHAR *name);
 
 TEB *qemu_getTEB(void);
+TEB32 *qemu_getTEB32(void);
 
 NTSTATUS qemu_LdrInitializeThunk(void);
 /* Not sure exactly if I'll ever need those, but they are copypasted along with the rest
