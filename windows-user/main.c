@@ -941,7 +941,7 @@ static void init_process_params(char **argv, const char *filenme)
         process_params32->CurrentDirectory.Handle = (ULONG_PTR)guest_PEB.ProcessParameters->CurrentDirectory.Handle;
         process_params32->CurrentDirectory.DosPath.Length = guest_PEB.ProcessParameters->CurrentDirectory.DosPath.Length;
         process_params32->CurrentDirectory.DosPath.MaximumLength = guest_PEB.ProcessParameters->CurrentDirectory.DosPath.MaximumLength;
-        process_params32->CurrentDirectory.DosPath.Buffer = (ULONG_PTR)my_alloc(process_params32->CurrentDirectory.DosPath.Length);
+        process_params32->CurrentDirectory.DosPath.Buffer = (ULONG_PTR)my_alloc(process_params32->CurrentDirectory.DosPath.MaximumLength);
 
         memcpy((void *)(ULONG_PTR)process_params32->CurrentDirectory.DosPath.Buffer,
                 guest_PEB.ProcessParameters->CurrentDirectory.DosPath.Buffer,
