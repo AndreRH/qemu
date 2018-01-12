@@ -16,6 +16,12 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
+#include "config.h"
+
+#include <wine/port.h>
+#include <wine/library.h>
+#include <wine/debug.h>
+
 #include "qemu/osdep.h"
 #include "qemu-version.h"
 
@@ -24,6 +30,8 @@
 #include "win_syscall.h"
 #include "delayloadhandler.h"
 #include "pe.h"
+
+WINE_DECLARE_DEBUG_CHANNEL(heap);
 
 struct load_host_dlls
 {
@@ -175,5 +183,17 @@ void do_syscall(struct qemu_syscall *call)
 
     qemu_log_mask(LOG_WIN32, "Handling syscall %16lx.\n", call->id);
 
+    if (WINE_WARN_ON(heap) && !HeapValidate(GetProcessHeap(), 0, NULL))
+    {
+        fprintf(stderr, "Heap is broken before syscall %lx\n", call->id);
+        ExitProcess(1);
+    }
+
     dlls[dll].handlers[func](call);
+
+    if (WINE_WARN_ON(heap) && !HeapValidate(GetProcessHeap(), 0, NULL))
+    {
+        fprintf(stderr, "Heap is broken after syscall %lx\n", call->id);
+        ExitProcess(1);
+    }
 }
