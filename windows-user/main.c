@@ -163,6 +163,7 @@ static TEB *alloc_teb(TEB32 **teb32)
         ret32->Tib.Self = (qemu_ptr)(ULONG_PTR)&ret32->Tib;
         ret32->Tib.ExceptionList = ~0U;
         ret32->Peb = (qemu_ptr)(ULONG_PTR)guest_PEB32;
+        ret->glReserved2 = ret32;
     }
 
     *teb32 = ret32;
