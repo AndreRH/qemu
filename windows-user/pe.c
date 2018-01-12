@@ -757,13 +757,30 @@ static BOOL is_dll_native_subsystem( HMODULE module, const IMAGE_NT_HEADERS *nt,
  */
 static SHORT alloc_tls_slot( LDR_MODULE *mod )
 {
-    const IMAGE_TLS_DIRECTORY *dir;
+    IMAGE_TLS_DIRECTORY64 dir_copy = {0};
+    const IMAGE_TLS_DIRECTORY64 *dir;
+    const IMAGE_TLS_DIRECTORY32 *dir32;
     ULONG i, size;
     void *new_ptr;
     LIST_ENTRY *entry;
 
-    if (!(dir = RtlImageDirectoryEntryToData( mod->BaseAddress, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &size )))
-        return -1;
+    if (is_32_bit)
+    {
+        if (!(dir32 = RtlImageDirectoryEntryToData( mod->BaseAddress, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &size )))
+            return -1;
+        dir_copy.StartAddressOfRawData = dir32->StartAddressOfRawData;
+        dir_copy.EndAddressOfRawData = dir32->EndAddressOfRawData;
+        dir_copy.AddressOfIndex = dir32->AddressOfIndex;
+        dir_copy.AddressOfCallBacks = dir32->AddressOfCallBacks;
+        dir_copy.SizeOfZeroFill = dir32->SizeOfZeroFill;
+        dir_copy.Characteristics = dir32->Characteristics;
+        dir = &dir_copy;
+    }
+    else
+    {
+        if (!(dir = RtlImageDirectoryEntryToData( mod->BaseAddress, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &size )))
+            return -1;
+    }
 
     size = dir->EndAddressOfRawData - dir->StartAddressOfRawData;
     if (!size && !dir->SizeOfZeroFill && !dir->AddressOfCallBacks) return -1;
@@ -794,14 +811,30 @@ static SHORT alloc_tls_slot( LDR_MODULE *mod )
         for (entry = tls_links.Flink; entry != &tls_links; entry = entry->Flink)
         {
             TEB *teb = CONTAINING_RECORD( entry, TEB, TlsLinks );
-            void **old = teb->ThreadLocalStoragePointer;
-            void **new = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, new_count * sizeof(*new));
+            TEB32 *teb32 = teb->glReserved2;
 
-            if (!new) return -1;
-            if (old) memcpy( new, old, tls_module_count * sizeof(*new) );
-            teb->ThreadLocalStoragePointer = new;
-            WINE_TRACE( "thread %04lx tls block %p -> %p\n", (ULONG_PTR)teb->ClientId.UniqueThread, old, new );
-            /* FIXME: can't free old block here, should be freed at thread exit */
+            if (teb32)
+            {
+                qemu_ptr *old = (qemu_ptr *)(ULONG_PTR)teb32->ThreadLocalStoragePointer;
+                qemu_ptr *new = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, new_count * sizeof(*new));
+
+                if (!new) return -1;
+                if (old) memcpy( new, old, tls_module_count * sizeof(*new) );
+                teb32->ThreadLocalStoragePointer = (ULONG_PTR)new;
+                WINE_TRACE( "thread %04lx tls block %p -> %p\n", (ULONG_PTR)teb32->ClientId.UniqueThread, old, new );
+                /* FIXME: can't free old block here, should be freed at thread exit */
+            }
+            else
+            {
+                void **old = teb->ThreadLocalStoragePointer;
+                void **new = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, new_count * sizeof(*new));
+
+                if (!new) return -1;
+                if (old) memcpy( new, old, tls_module_count * sizeof(*new) );
+                teb->ThreadLocalStoragePointer = new;
+                WINE_TRACE( "thread %04lx tls block %p -> %p\n", (ULONG_PTR)teb->ClientId.UniqueThread, old, new );
+                /* FIXME: can't free old block here, should be freed at thread exit */
+            }
         }
 
         tls_dirs = new_ptr;
@@ -812,6 +845,7 @@ static SHORT alloc_tls_slot( LDR_MODULE *mod )
     for (entry = tls_links.Flink; entry != &tls_links; entry = entry->Flink)
     {
         TEB *teb = CONTAINING_RECORD( entry, TEB, TlsLinks );
+        TEB32 *teb32 = teb->glReserved2;
 
         if (!(new_ptr = RtlAllocateHeap( GetProcessHeap(), 0, size + dir->SizeOfZeroFill ))) return -1;
         memcpy( new_ptr, (void *)dir->StartAddressOfRawData, size );
@@ -820,8 +854,16 @@ static SHORT alloc_tls_slot( LDR_MODULE *mod )
         WINE_TRACE( "thread %04lx slot %u: %u/%u bytes at %p\n",
                (ULONG_PTR)teb->ClientId.UniqueThread, i, size, dir->SizeOfZeroFill, new_ptr );
 
-        RtlFreeHeap( GetProcessHeap(), 0,
-                     interlocked_xchg_ptr( (void **)teb->ThreadLocalStoragePointer + i, new_ptr ));
+        if (teb32)
+        {
+            RtlFreeHeap( GetProcessHeap(), 0,
+                    (void *)(ULONG_PTR)interlocked_xchg(((int *)(ULONG_PTR)teb32->ThreadLocalStoragePointer) + i, (ULONG_PTR)new_ptr ));
+        }
+        else
+        {
+            RtlFreeHeap( GetProcessHeap(), 0,
+                    interlocked_xchg_ptr( (void **)teb->ThreadLocalStoragePointer + i, new_ptr ));
+        }
     }
 
     *(DWORD *)dir->AddressOfIndex = i;
@@ -976,36 +1018,71 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
  */
 static NTSTATUS alloc_thread_tls(void)
 {
-    void **pointers;
     UINT i, size;
+    TEB *teb = qemu_getTEB();
+    TEB32 *teb32 = qemu_getTEB32();
 
     if (!tls_module_count) return STATUS_SUCCESS;
 
-    if (!(pointers = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                      tls_module_count * sizeof(*pointers) )))
-        return STATUS_NO_MEMORY;
-
-    for (i = 0; i < tls_module_count; i++)
+    if (teb32)
     {
-        const IMAGE_TLS_DIRECTORY *dir = &tls_dirs[i];
-
-        if (!dir) continue;
-        size = dir->EndAddressOfRawData - dir->StartAddressOfRawData;
-        if (!size && !dir->SizeOfZeroFill) continue;
-
-        if (!(pointers[i] = RtlAllocateHeap( GetProcessHeap(), 0, size + dir->SizeOfZeroFill )))
-        {
-            while (i) RtlFreeHeap( GetProcessHeap(), 0, pointers[--i] );
-            RtlFreeHeap( GetProcessHeap(), 0, pointers );
+        qemu_ptr *pointers;
+        if (!(pointers = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                        tls_module_count * sizeof(*pointers) )))
             return STATUS_NO_MEMORY;
-        }
-        memcpy( pointers[i], (void *)dir->StartAddressOfRawData, size );
-        memset( (char *)pointers[i] + size, 0, dir->SizeOfZeroFill );
 
-        WINE_TRACE( "thread %04x slot %u: %u/%u bytes at %p\n",
-               GetCurrentThreadId(), i, size, dir->SizeOfZeroFill, pointers[i] );
+        for (i = 0; i < tls_module_count; i++)
+        {
+            /* Don't use IMAGE_TLS_DIRECTORY32 here, we stored the contents of the converted structure. */
+            const IMAGE_TLS_DIRECTORY *dir = &tls_dirs[i];
+
+            if (!dir) continue;
+            size = dir->EndAddressOfRawData - dir->StartAddressOfRawData;
+            if (!size && !dir->SizeOfZeroFill) continue;
+
+            if (!(pointers[i] = (ULONG_PTR)RtlAllocateHeap( GetProcessHeap(), 0, size + dir->SizeOfZeroFill )))
+            {
+                while (i) RtlFreeHeap( GetProcessHeap(), 0, (void *)(ULONG_PTR)pointers[--i] );
+                RtlFreeHeap( GetProcessHeap(), 0, pointers );
+                return STATUS_NO_MEMORY;
+            }
+            memcpy( (void *)(ULONG_PTR)pointers[i], (void *)dir->StartAddressOfRawData, size );
+            memset( ((char *)(ULONG_PTR)pointers[i]) + size, 0, dir->SizeOfZeroFill );
+
+            WINE_TRACE( "thread %04x slot %u: %u/%u bytes at 0x%08x\n",
+                GetCurrentThreadId(), i, size, dir->SizeOfZeroFill, pointers[i] );
+        }
+        teb32->ThreadLocalStoragePointer = (ULONG_PTR)pointers;
     }
-    qemu_getTEB()->ThreadLocalStoragePointer = pointers;
+    else
+    {
+        void **pointers;
+        if (!(pointers = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                        tls_module_count * sizeof(*pointers) )))
+            return STATUS_NO_MEMORY;
+
+        for (i = 0; i < tls_module_count; i++)
+        {
+            const IMAGE_TLS_DIRECTORY *dir = &tls_dirs[i];
+
+            if (!dir) continue;
+            size = dir->EndAddressOfRawData - dir->StartAddressOfRawData;
+            if (!size && !dir->SizeOfZeroFill) continue;
+
+            if (!(pointers[i] = RtlAllocateHeap( GetProcessHeap(), 0, size + dir->SizeOfZeroFill )))
+            {
+                while (i) RtlFreeHeap( GetProcessHeap(), 0, pointers[--i] );
+                RtlFreeHeap( GetProcessHeap(), 0, pointers );
+                return STATUS_NO_MEMORY;
+            }
+            memcpy( pointers[i], (void *)dir->StartAddressOfRawData, size );
+            memset( (char *)pointers[i] + size, 0, dir->SizeOfZeroFill );
+
+            WINE_TRACE( "thread %04x slot %u: %u/%u bytes at %p\n",
+                GetCurrentThreadId(), i, size, dir->SizeOfZeroFill, pointers[i] );
+        }
+        teb->ThreadLocalStoragePointer = pointers;
+    }
     return STATUS_SUCCESS;
 }
 
@@ -1015,17 +1092,36 @@ static NTSTATUS alloc_thread_tls(void)
  */
 static void call_tls_callbacks( HMODULE module, UINT reason )
 {
-    const IMAGE_TLS_DIRECTORY *dir;
-    const PIMAGE_TLS_CALLBACK *callback;
     ULONG dirsize;
 
-    dir = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &dirsize );
-    if (!dir || !dir->AddressOfCallBacks) return;
-
-    for (callback = (const PIMAGE_TLS_CALLBACK *)dir->AddressOfCallBacks; *callback; callback++)
+    if (is_32_bit)
     {
-        /* FIXME: Exception handling removed. */
-        call_dll_entry_point( (DLLENTRYPROC)*callback, module, reason, NULL );
+        const IMAGE_TLS_DIRECTORY32 *dir32;
+        const qemu_ptr *callback_array;
+        PIMAGE_TLS_CALLBACK callback;
+        dir32 = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &dirsize );
+        if (!dir32 || !dir32->AddressOfCallBacks) return;
+
+        for (callback_array = (qemu_ptr *)(ULONG_PTR)dir32->AddressOfCallBacks;
+                (callback = (PIMAGE_TLS_CALLBACK)(ULONG_PTR)(*callback_array));
+                callback_array++)
+        {
+            /* FIXME: Exception handling removed. */
+            call_dll_entry_point( (DLLENTRYPROC)callback, module, reason, NULL );
+        }
+    }
+    else
+    {
+        const IMAGE_TLS_DIRECTORY64 *dir;
+        const PIMAGE_TLS_CALLBACK *callback;
+        dir = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &dirsize );
+        if (!dir || !dir->AddressOfCallBacks) return;
+
+        for (callback = (const PIMAGE_TLS_CALLBACK *)dir->AddressOfCallBacks; *callback; callback++)
+        {
+            /* FIXME: Exception handling removed. */
+            call_dll_entry_point( (DLLENTRYPROC)*callback, module, reason, NULL );
+        }
     }
 }
 
