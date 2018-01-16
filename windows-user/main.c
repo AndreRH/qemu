@@ -972,6 +972,17 @@ static void block_address_space(void)
         size >>= 1;
     }
 
+    /* Wine may have pre-reserved areas that we can't catch with mmap, e.g. on x86_64 Linux hosts. */
+    size = 1UL << 63UL;
+    while(size >= 4096)
+    {
+        do
+        {
+            map = VirtualAlloc(0, size, MEM_RESERVE, PAGE_NOACCESS);
+        } while(map);
+        size >>= 1;
+    }
+
     /* It appears that the heap manager has a few pages we can't mmap, but malloc will successfully
      * allocate from. On my system this gives me about 140kb of memory.
      *
