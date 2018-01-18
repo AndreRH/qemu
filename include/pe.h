@@ -9,6 +9,7 @@ HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name);
 const void *qemu_GetProcAddress(HMODULE module, const char *name);
 BOOL qemu_FreeLibrary(HMODULE module);
 BOOL qemu_FindEntryForAddress(void *addr, HMODULE *mod);
+NTSTATUS WINAPI hook_LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod);
 BOOL qemu_DisableThreadLibraryCalls(HMODULE mod);
 BOOL qemu_get_ldr_module(HANDLE process, HMODULE mod, void **ldr);
 void *qemu_RtlPcToFileHeader(void *pc, void **address);
