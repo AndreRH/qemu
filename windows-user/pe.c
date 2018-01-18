@@ -1393,6 +1393,36 @@ static NTSTATUS qemu_LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
     return STATUS_NO_MORE_ENTRIES;
 }
 
+/* Give Wine's loader information about our loaded modules. This is needed for creating
+ * activation contexts from loaded guest modules. */
+NTSTATUS WINAPI hook_LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
+{
+    PLIST_ENTRY mark, entry;
+    PLDR_MODULE mod;
+    NTSTATUS ret;
+
+    WINE_TRACE("Looking for address %p.\n", addr);
+    mark = &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList;
+    for (entry = mark->Flink; entry != mark; entry = entry->Flink)
+    {
+        mod = CONTAINING_RECORD(entry, LDR_MODULE, InMemoryOrderModuleList);
+        if (mod->BaseAddress <= addr &&
+            (const char *)addr < (char*)mod->BaseAddress + mod->SizeOfImage)
+        {
+            WINE_TRACE("Found address %p in Wine's PEB.\n", addr);
+            *pmod = mod;
+            return STATUS_SUCCESS;
+        }
+    }
+
+    ret = qemu_LdrFindEntryForAddress(addr, pmod);
+    if (ret == STATUS_SUCCESS)
+        WINE_TRACE("Found address %p in qemu's PEB.\n", addr);
+    else
+        WINE_WARN("Did not find a module for address %p.\n", addr);
+    return ret;
+}
+
 /******************************************************************
  *              LdrEnumerateLoadedModules (NTDLL.@)
  */
