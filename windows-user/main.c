@@ -1331,6 +1331,7 @@ BOOL qemu_DllMain(DWORD reason, void *reserved)
     if (reason == DLL_THREAD_DETACH && thread_cpu)
     {
         qemu_log("Informing rcu about disappearing thread.\n");
+        thread_cpu = NULL;
         rcu_unregister_thread();
     }
 
