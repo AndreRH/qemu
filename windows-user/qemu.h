@@ -286,6 +286,63 @@ typedef struct DECLSPEC_ALIGN(16) {
     DWORD64 LastExceptionFromRip; /* 4c8 */
 } qemu_CONTEXT_X86_64;
 
+#define QEMU_SIZE_OF_80387_REGISTERS      80
+
+struct qemu_FLOATING_SAVE_AREA
+{
+    DWORD   ControlWord;
+    DWORD   StatusWord;
+    DWORD   TagWord;
+    DWORD   ErrorOffset;
+    DWORD   ErrorSelector;
+    DWORD   DataOffset;
+    DWORD   DataSelector;
+    BYTE    RegisterArea[QEMU_SIZE_OF_80387_REGISTERS];
+    DWORD   Cr0NpxState;
+};
+
+#define QEMU_MAXIMUM_SUPPORTED_EXTENSION     512
+
+struct qemu_CONTEXT_X86
+{
+    DWORD   ContextFlags;
+
+    /* These are selected by CONTEXT_DEBUG_REGISTERS */
+    DWORD   Dr0;
+    DWORD   Dr1;
+    DWORD   Dr2;
+    DWORD   Dr3;
+    DWORD   Dr6;
+    DWORD   Dr7;
+
+    /* These are selected by CONTEXT_FLOATING_POINT */
+    struct qemu_FLOATING_SAVE_AREA FloatSave;
+
+    /* These are selected by CONTEXT_SEGMENTS */
+    DWORD   SegGs;
+    DWORD   SegFs;
+    DWORD   SegEs;
+    DWORD   SegDs;
+
+    /* These are selected by CONTEXT_INTEGER */
+    DWORD   Edi;
+    DWORD   Esi;
+    DWORD   Ebx;
+    DWORD   Edx;
+    DWORD   Ecx;
+    DWORD   Eax;
+
+    /* These are selected by CONTEXT_CONTROL */
+    DWORD   Ebp;
+    DWORD   Eip;
+    DWORD   SegCs;
+    DWORD   EFlags;
+    DWORD   Esp;
+    DWORD   SegSs;
+
+    BYTE    ExtendedRegisters[QEMU_MAXIMUM_SUPPORTED_EXTENSION];
+};
+
 extern uint64_t guest_exception_handler, guest_call_entry;
 extern BOOL is_32_bit;
 
