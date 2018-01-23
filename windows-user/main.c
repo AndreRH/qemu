@@ -16,6 +16,10 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
+
+#include <ntstatus.h>
+#define WIN32_NO_STATUS
+
 #include "qemu/osdep.h"
 #include "qemu-version.h"
 
@@ -1411,4 +1415,77 @@ BOOL qemu_DllMain(DWORD reason, void *reserved)
     }
 
     return TRUE;
+}
+
+static void cpu_context_32_to_env(CPUX86State *env, const struct qemu_CONTEXT_X86 *context)
+{
+    /* PXhome */
+
+    /* FIXME: check which flags are set */
+
+    /* FIXME: Do I really want .selector? I'm not entirely sure how those segment regs work. */
+    env->segs[R_CS].selector = context->SegCs;
+    env->segs[R_DS].selector = context->SegDs;
+    env->segs[R_ES].selector = context->SegEs;
+    env->segs[R_FS].selector = context->SegFs;
+    env->segs[R_GS].selector = context->SegGs;
+    env->segs[R_SS].selector = context->SegSs;
+
+    env->eflags = context->EFlags;
+
+    env->dr[0] = context->Dr0;
+    env->dr[1] = context->Dr1;
+    env->dr[2] = context->Dr2;
+    env->dr[3] = context->Dr3;
+    env->dr[6] = context->Dr6;
+    env->dr[7] = context->Dr7;
+
+    env->regs[R_EAX] = context->Eax;
+    env->regs[R_EBX] = context->Ebx;
+    env->regs[R_ECX] = context->Ecx;
+    env->regs[R_EDX] = context->Edx;
+    env->regs[R_ESP] = context->Esp;
+    env->regs[R_EBP] = context->Ebp;
+    env->regs[R_ESI] = context->Esi;
+    env->regs[R_EDI] = context->Edi;
+    env->eip = context->Eip;
+
+    /* TODO: Floating point. */
+    /* TODO: What is ExtendedRegisters? Seems to belong to float and contain stuff like MMX. */
+}
+
+NTSTATUS qemu_set_context(HANDLE thread, void *context)
+{
+    if (thread != GetCurrentThread())
+    {
+        /* Finding the right env pointer to manipulate shouldn't be too hard.
+         * In addition we need a way to stop qemu from working if it is running,
+         * (I guess EXCP_INTERRUPT should help here). If qemu is not running and
+         * we are in a Windows API call we need to set the host context to get
+         * out of the call. */
+        fprintf(stderr, "Not supported on foreign thread yet.\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    /* We are either in the NtSetContextThread syscall, which will return gracefully to
+     * qemu's main loop after we return here, or we are in an exception handler. In the
+     * latter case qemu_NtSetContextThread() will think it is returning to the guest
+     * side NtSetContextThread, but in fact it just resumes execution whereever the new
+     * context sets it to.
+     *
+     * If we're in a system call the next return from the guest to a host callback should
+     * sort things out with the longjmp detection in qemu_execute(). */
+    if (is_32_bit)
+    {
+        CPUX86State *env = thread_cpu->env_ptr;
+        cpu_context_32_to_env(env, context);
+    }
+    else
+    {
+        /* Currently we have guest side code that doesn't set the debug registers... */
+        fprintf(stderr, "Not implemented for 64 bit!\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    return STATUS_SUCCESS;
 }
