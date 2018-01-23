@@ -325,7 +325,7 @@ static void init_thread_cpu(void)
     thread_cpu = cpu;
 }
 
-static void cpu_env_to_context(qemu_CONTEXT_X86_64 *context, CPUX86State *env)
+static void cpu_env_to_context_64(qemu_CONTEXT_X86_64 *context, CPUX86State *env)
 {
     X86XSaveArea buf;
 
@@ -380,6 +380,45 @@ static void cpu_env_to_context(qemu_CONTEXT_X86_64 *context, CPUX86State *env)
     context->FltSave.MxCsr_Mask = 0x0000ffff;
 }
 
+static void cpu_env_to_context_32(struct qemu_CONTEXT_X86 *context, CPUX86State *env)
+{
+    memset(context, 0, sizeof(*context));
+
+    /* PXhome */
+
+    context->ContextFlags = QEMU_CONTEXT_CONTROL | QEMU_CONTEXT_INTEGER | QEMU_CONTEXT_SEGMENTS | QEMU_CONTEXT_DEBUG_REGISTERS;
+
+    /* FIXME: Do I really want .selector? I'm not entirely sure how those segment regs work. */
+    context->SegCs = env->segs[R_CS].selector;
+    context->SegDs = env->segs[R_DS].selector;
+    context->SegEs = env->segs[R_ES].selector;
+    context->SegFs = env->segs[R_FS].selector;
+    context->SegGs = env->segs[R_GS].selector;
+    context->SegSs = env->segs[R_SS].selector;
+
+    context->EFlags = env->eflags;
+
+    context->Dr0 = env->dr[0];
+    context->Dr1 = env->dr[1];
+    context->Dr2 = env->dr[2];
+    context->Dr3 = env->dr[3];
+    context->Dr6 = env->dr[6];
+    context->Dr7 = env->dr[7];
+
+    context->Eax = env->regs[R_EAX];
+    context->Ebx = env->regs[R_EBX];
+    context->Ecx = env->regs[R_ECX];
+    context->Edx = env->regs[R_EDX];
+    context->Esp = env->regs[R_ESP];
+    context->Ebp = env->regs[R_EBP];
+    context->Esi = env->regs[R_ESI];
+    context->Edi = env->regs[R_EDI];
+    context->Eip = env->eip;
+
+    /* TODO: Floating point. */
+    /* TODO: What is ExtendedRegisters? Seems to belong to float and contain stuff like MMX. */
+}
+
 static void cpu_loop(const void *code)
 {
     CPUState *cs;
@@ -387,8 +426,26 @@ static void cpu_loop(const void *code)
     int trapnr;
     void *syscall;
     EXCEPTION_POINTERS except;
+    struct
+    {
+        qemu_ptr ExceptionRecord;
+        qemu_ptr ContextRecord;
+    } except32;
     EXCEPTION_RECORD exception_record;
-    qemu_CONTEXT_X86_64 guest_context;
+    struct
+    {
+        DWORD ExceptionCode;
+        DWORD ExceptionFlags;
+        qemu_ptr *ExceptionRecord;
+        qemu_ptr ExceptionAddress;
+        DWORD NumberParameters;
+        qemu_ptr ExceptionInformation[EXCEPTION_MAXIMUM_PARAMETERS];
+    } record32;
+    union
+    {
+        struct qemu_CONTEXT_X86 guest_context32;
+        qemu_CONTEXT_X86_64 guest_context64;
+    } ctxes;
     TEB *teb = NtCurrentTeb();
 
     cs = thread_cpu;
@@ -432,18 +489,36 @@ static void cpu_loop(const void *code)
                 continue;
 
             case EXCP0E_PAGE:
-                memset(&except, 0, sizeof(except));
-                except.ExceptionRecord = &exception_record;
-                except.ContextRecord = (void *)&guest_context;
+                if (is_32_bit)
+                {
+                    memset(&except32, 0, sizeof(except32));
+                    except32.ExceptionRecord = (ULONG_PTR)&record32;
+                    except32.ContextRecord = (ULONG_PTR)&ctxes.guest_context32;
 
-                memset(&exception_record, 0, sizeof(exception_record));
-                exception_record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
-                exception_record.ExceptionFlags = 0;
-                exception_record.ExceptionRecord = NULL;
-                exception_record.ExceptionAddress = (void *)env->eip;
-                exception_record.NumberParameters = 0;
+                    memset(&record32, 0, sizeof(record32));
+                    record32.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
+                    record32.ExceptionFlags = 0;
+                    record32.ExceptionRecord = 0;
+                    record32.ExceptionAddress = (ULONG_PTR)env->eip;
+                    record32.NumberParameters = 0;
 
-                cpu_env_to_context(&guest_context, env);
+                    cpu_env_to_context_32(&ctxes.guest_context32, env);
+                }
+                else
+                {
+                    memset(&except, 0, sizeof(except));
+                    except.ExceptionRecord = &exception_record;
+                    except.ContextRecord = (void *)&ctxes.guest_context64;
+
+                    memset(&exception_record, 0, sizeof(exception_record));
+                    exception_record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
+                    exception_record.ExceptionFlags = 0;
+                    exception_record.ExceptionRecord = NULL;
+                    exception_record.ExceptionAddress = (void *)env->eip;
+                    exception_record.NumberParameters = 0;
+
+                    cpu_env_to_context_64(&ctxes.guest_context64, env);
+                }
 
                 if (env->eip == guest_exception_handler)
                 {
@@ -461,7 +536,7 @@ static void cpu_loop(const void *code)
                  * we don't push a return address onto the stack. */
                 env->regs[R_ESP] &= ~0xf;
                 env->regs[R_ESP] += 8;
-                env->regs[R_ECX] = h2g(&except);
+                env->regs[R_ECX] = is_32_bit ? h2g(&except32) : h2g(&except);
                 env->eip = guest_exception_handler;
                 continue;
 
