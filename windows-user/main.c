@@ -1419,36 +1419,45 @@ BOOL qemu_DllMain(DWORD reason, void *reserved)
 
 static void cpu_context_32_to_env(CPUX86State *env, const struct qemu_CONTEXT_X86 *context)
 {
-    /* PXhome */
-
-    /* FIXME: check which flags are set */
-
     /* FIXME: Do I really want .selector? I'm not entirely sure how those segment regs work. */
-    env->segs[R_CS].selector = context->SegCs;
-    env->segs[R_DS].selector = context->SegDs;
-    env->segs[R_ES].selector = context->SegEs;
-    env->segs[R_FS].selector = context->SegFs;
-    env->segs[R_GS].selector = context->SegGs;
-    env->segs[R_SS].selector = context->SegSs;
+    if (context->ContextFlags & QEMU_CONTEXT_SEGMENTS)
+    {
+        env->segs[R_DS].selector = context->SegDs;
+        env->segs[R_ES].selector = context->SegEs;
+        env->segs[R_FS].selector = context->SegFs;
+        env->segs[R_GS].selector = context->SegGs;
+    }
 
-    env->eflags = context->EFlags;
 
-    env->dr[0] = context->Dr0;
-    env->dr[1] = context->Dr1;
-    env->dr[2] = context->Dr2;
-    env->dr[3] = context->Dr3;
-    env->dr[6] = context->Dr6;
-    env->dr[7] = context->Dr7;
+    if (context->ContextFlags & QEMU_CONTEXT_DEBUG_REGISTERS)
+    {
+        env->dr[0] = context->Dr0;
+        env->dr[1] = context->Dr1;
+        env->dr[2] = context->Dr2;
+        env->dr[3] = context->Dr3;
+        env->dr[6] = context->Dr6;
+        env->dr[7] = context->Dr7;
+    }
 
-    env->regs[R_EAX] = context->Eax;
-    env->regs[R_EBX] = context->Ebx;
-    env->regs[R_ECX] = context->Ecx;
-    env->regs[R_EDX] = context->Edx;
-    env->regs[R_ESP] = context->Esp;
-    env->regs[R_EBP] = context->Ebp;
-    env->regs[R_ESI] = context->Esi;
-    env->regs[R_EDI] = context->Edi;
-    env->eip = context->Eip;
+    if (context->ContextFlags & CONTEXT_INTEGER)
+    {
+        env->regs[R_EAX] = context->Eax;
+        env->regs[R_EBX] = context->Ebx;
+        env->regs[R_ECX] = context->Ecx;
+        env->regs[R_EDX] = context->Edx;
+        env->regs[R_ESI] = context->Esi;
+        env->regs[R_EDI] = context->Edi;
+    }
+
+    if (context->ContextFlags & QEMU_CONTEXT_CONTROL)
+    {
+        env->eip = context->Eip;
+        env->segs[R_CS].selector = context->SegCs;
+        env->regs[R_ESP] = context->Esp;
+        env->regs[R_EBP] = context->Ebp;
+        env->segs[R_SS].selector = context->SegSs;
+        env->eflags = context->EFlags;
+    }
 
     /* TODO: Floating point. */
     /* TODO: What is ExtendedRegisters? Seems to belong to float and contain stuff like MMX. */
