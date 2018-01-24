@@ -1290,6 +1290,7 @@ int main(int argc, char **argv, char **envp)
 
     tcg_exec_init(0);
     tcg_prologue_init(tcg_ctx);
+    tcg_region_init();
     init_thread_cpu();
 
     init_process_params(argv + optind, filename);
