@@ -154,6 +154,7 @@ static TEB *alloc_teb(TEB32 **teb32)
     ret->Tib.Self = &ret->Tib;
     ret->Tib.ExceptionList = (void *)~0UL;
     ret->Peb = &guest_PEB;
+    ret->ClientId = NtCurrentTeb()->ClientId;
 
     if (is_32_bit)
     {
@@ -167,6 +168,8 @@ static TEB *alloc_teb(TEB32 **teb32)
         ret32->Tib.Self = (qemu_ptr)(ULONG_PTR)&ret32->Tib;
         ret32->Tib.ExceptionList = ~0U;
         ret32->Peb = (qemu_ptr)(ULONG_PTR)guest_PEB32;
+        ret32->ClientId.UniqueProcess = (ULONG_PTR)ret->ClientId.UniqueProcess;
+        ret32->ClientId.UniqueThread = (ULONG_PTR)ret->ClientId.UniqueThread;
         ret->glReserved2 = ret32;
     }
 
