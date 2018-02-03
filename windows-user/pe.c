@@ -2139,7 +2139,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
 {
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
-    UNICODE_STRING nt_name;
+    UNICODE_STRING nt_name, nt_name_orig;
     WCHAR *file_part, *ext, *dllname, *sysdir, *qemu_sysdir = get_guest_dll_path();
     ULONG len, sysdirlen;
     BOOLEAN convert;
@@ -2162,6 +2162,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
     GetSystemDirectoryW(sysdir, sysdirlen);
 
     nt_name.Buffer = NULL;
+    nt_name_orig.Buffer = NULL;
 
     if (!contains_path( libname ))
     {
@@ -2255,6 +2256,8 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
     {
         WCHAR *filename2;
 
+        convert = RtlDosPathNameToNtPathName_U( libname, &nt_name_orig, &file_part, NULL );
+
         len = strlenW(qemu_sysdir) + strlenW(libname) + 1;
         filename2 = my_alloc(len * sizeof(*filename2));
         strcpyW(filename2, qemu_sysdir);
@@ -2277,9 +2280,23 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
         my_free(sysdir);
         return STATUS_NO_MEMORY;
     }
-    len = nt_name.Length - 4*sizeof(WCHAR);  /* for \??\ prefix */
-    if (len >= *size) goto overflow;
-    memcpy( filename, nt_name.Buffer + 4, len + sizeof(WCHAR) );
+    if (nt_name_orig.Buffer)
+    {
+        /* Because the loaded DLL list stores the original name we have to call find_fullname_module
+         * with the unmodified name.
+         *
+         * But handling it this way is dead ugly. Try to do this nicer. */
+        len = nt_name_orig.Length - 4*sizeof(WCHAR);  /* for \??\ prefix */
+        if (len >= *size) goto overflow;
+        memcpy( filename, nt_name_orig.Buffer + 4, len + sizeof(WCHAR) );
+        RtlFreeUnicodeString( &nt_name_orig );
+    }
+    else
+    {
+        len = nt_name.Length - 4*sizeof(WCHAR);  /* for \??\ prefix */
+        if (len >= *size) goto overflow;
+        memcpy( filename, nt_name.Buffer + 4, len + sizeof(WCHAR) );
+    }
     if (!(*pwm = find_fullname_module( filename )) && handle)
     {
         attr.Length = sizeof(attr);
