@@ -1264,9 +1264,15 @@ int main(int argc, char **argv, char **envp)
     __wine_main_argv += optind;
     __wine_main_wargv += optind;
 
-    i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
+    i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0) + 4;
     filenameW = my_alloc(i * sizeof(*filenameW));
     MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, i);
+
+    if (!strstr(filename, "."))
+    {
+        static const WCHAR exe[] = {'.','e','x','e',0};
+        strcatW(filenameW, exe);
+    }
 
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
