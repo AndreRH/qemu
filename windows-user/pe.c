@@ -3429,3 +3429,67 @@ BOOL qemu_is_32_bit_exe(const WCHAR *name)
     WINE_TRACE("%s is a %u bit app\n", wine_dbgstr_w(name), ret ? 32 : 64);
     return ret;
 }
+
+/* This function returns e.g. the host user32.dll module for the guest user32.dll module. This is
+ * needed for functions that look up resource data in system DLLs. Our guest wrappers currently
+ * do not have this data.
+ *
+ * FIXME: This function probably fails for modules loaded from WinSXS because we have to replace
+ * the arch-specific path. It might also errnously translate a DLL that is loaded as a full Wine
+ * PE DLL but is also loaded on the host side, like ole32.dll. Ideally the latter case shouldn't
+ * matter. */
+HMODULE qemu_ldr_module_g2h(uint64_t guest)
+{
+    HMODULE ret;
+    WINE_MODREF *modref;
+    WCHAR *name;
+    HMODULE guest_mod = QEMU_G2H(guest);
+    DWORD le = GetLastError(); /* FIXME: Contemplate using ntdll functions that don't call SetLastError(). */
+
+    /* Translate NULL to the guest .exe instead of qemu. This is not correct for all functions,
+     * e.g. some user32 functions translate NULL to user32.dll. Handle this yourself if you
+     * need different behavior. */
+    WINE_TRACE("Looking for %p.\n", guest_mod);
+
+    if (!guest_mod)
+    {
+        ret = qemu_GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL);
+        WINE_TRACE("Returning main .exe file %p.\n", ret);
+        SetLastError(le);
+        return ret;
+    }
+
+    RtlEnterCriticalSection( &loader_section );
+    modref = get_modref(guest_mod);
+    RtlLeaveCriticalSection( &loader_section );
+    if (!modref)
+    {
+        /* Sometimes we get junk pointers in situations where the application doesn't expect
+         * us to load anything from a resource, e.g. in comctl32.PropertySheet. Handle this
+         * gracefully by leaving the junk untouched. Figuring out if a HMOUDLE pointer will
+         * be used by the host isn't always easy. */
+        WINE_WARN("Cound not find modref for module %p.\n", guest_mod);
+        SetLastError(le);
+        return guest_mod;
+    }
+
+    name = modref->ldr.BaseDllName.Buffer;
+    WINE_TRACE("Looking for %s.\n", wine_dbgstr_w(name));
+    /* Look for a host module of the same name. Note that our own DLLs either have just the DLL name,
+     * or are in C:\windows\system32. Both should work for Wine DLLs. */
+    ret = GetModuleHandleW(name);
+    if (ret)
+    {
+        WINE_TRACE("Found %p for %p, name %s.\n", ret, guest_mod, wine_dbgstr_w(name));
+    }
+    else
+    {
+        /* This means that the module we are looking for is not part of a guest-host pair,
+         * but is a DLL only loaded in the host, e.g. an application DLL. */
+        WINE_TRACE("Did not find %s, using guest module %p.\n", wine_dbgstr_w(name), guest_mod);
+        ret = guest_mod;
+    }
+
+    SetLastError(le);
+    return ret;
+}
