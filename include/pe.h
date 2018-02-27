@@ -14,6 +14,7 @@ BOOL qemu_DisableThreadLibraryCalls(HMODULE mod);
 BOOL qemu_get_ldr_module(HANDLE process, HMODULE mod, void **ldr);
 void *qemu_RtlPcToFileHeader(void *pc, void **address);
 BOOL qemu_is_32_bit_exe(const WCHAR *name);
+HMODULE qemu_ldr_module_g2h(uint64_t guest);
 
 TEB *qemu_getTEB(void);
 TEB32 *qemu_getTEB32(void);
