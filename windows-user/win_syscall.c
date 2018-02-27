@@ -70,6 +70,7 @@ static const struct qemu_ops ops =
     qemu_RtlPcToFileHeader,
     qemu_DllMain,
     qemu_set_context,
+    qemu_ldr_module_g2h,
 };
 
 BOOL load_host_dlls(BOOL load_msvcrt)
