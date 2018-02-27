@@ -291,6 +291,7 @@ struct qemu_ops
     void *(*qemu_RtlPcToFileHeader)(void *pc, void **address);
     BOOL (*qemu_DllMain)(DWORD reason, void *reserved);
     NTSTATUS (*qemu_set_context)(HANDLE thread, void *ctx);
+    HMODULE (*qemu_module_g2h)(uint64_t guest);
 };
 
 typedef void (*syscall_handler)(struct qemu_syscall *call);
