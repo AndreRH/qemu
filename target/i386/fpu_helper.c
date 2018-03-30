@@ -354,6 +354,7 @@ void helper_ffree_STN(CPUX86State *env, int st_index)
 void helper_fmov_ST0_FT0(CPUX86State *env)
 {
     ST0 = FT0;
+    env->fptags[0] = 0;
 }
 
 void helper_fmov_FT0_STN(CPUX86State *env, int st_index)
@@ -364,6 +365,7 @@ void helper_fmov_FT0_STN(CPUX86State *env, int st_index)
 void helper_fmov_ST0_STN(CPUX86State *env, int st_index)
 {
     ST0 = ST(st_index);
+    env->fptags[0] = 0;
 }
 
 void helper_fmov_STN_ST0(CPUX86State *env, int st_index)
@@ -506,36 +508,43 @@ void helper_fabs_ST0(CPUX86State *env)
 void helper_fld1_ST0(CPUX86State *env)
 {
     ST0 = floatx80_one;
+    env->fptags[0] = 0;
 }
 
 void helper_fldl2t_ST0(CPUX86State *env)
 {
     ST0 = floatx80_l2t;
+    env->fptags[0] = 0;
 }
 
 void helper_fldl2e_ST0(CPUX86State *env)
 {
     ST0 = floatx80_l2e;
+    env->fptags[0] = 0;
 }
 
 void helper_fldpi_ST0(CPUX86State *env)
 {
     ST0 = floatx80_pi;
+    env->fptags[0] = 0;
 }
 
 void helper_fldlg2_ST0(CPUX86State *env)
 {
     ST0 = floatx80_lg2;
+    env->fptags[0] = 0;
 }
 
 void helper_fldln2_ST0(CPUX86State *env)
 {
     ST0 = floatx80_ln2;
+    env->fptags[0] = 0;
 }
 
 void helper_fldz_ST0(CPUX86State *env)
 {
     ST0 = floatx80_zero;
+    env->fptags[0] = 0;
 }
 
 void helper_fldz_FT0(CPUX86State *env)
@@ -641,6 +650,7 @@ void helper_fbld_ST0(CPUX86State *env, target_ulong ptr)
     }
     fpush(env);
     ST0 = tmp;
+    env->fptags[0] = 0;
 }
 
 void helper_fbst_ST0(CPUX86State *env, target_ulong ptr)
@@ -953,7 +963,7 @@ void helper_fxam_ST0(CPUX86State *env)
     temp.d = ST0;
 
     env->fpus &= ~0x4700; /* (C3,C2,C1,C0) <-- 0000 */
-    if (SIGND(temp)) {
+    if (SIGND(temp) && !env->fptags[0]) {
         env->fpus |= 0x200; /* C1 <-- 1 */
     }
 
