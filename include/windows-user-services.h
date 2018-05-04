@@ -27,8 +27,10 @@ static inline void qemu_syscall(struct qemu_syscall *call)
 
 static inline uint64_t guest_HANDLE_g2h(HANDLE h)
 {
-    /* Invalid handle == current process, ~1 == current thread. */
-    if (h == INVALID_HANDLE_VALUE || h == (HANDLE)~(ULONG_PTR)1)
+    /* ~0 == Invalid handle == current process, ~1 == current thread, ~3 == current process token,
+     * ~4 == GetCurrentThreadToken(), ~5 == GetCurrentThreadEffectiveToken() */
+    if (h == INVALID_HANDLE_VALUE || h == (HANDLE)~(ULONG_PTR)1 || h == (HANDLE)~(ULONG_PTR)3
+            || h == (HANDLE)~(ULONG_PTR)4 || h == (HANDLE)~(ULONG_PTR)5)
         return (LONG_PTR)h;
     else
         return (ULONG_PTR)h;
