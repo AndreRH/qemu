@@ -70,11 +70,10 @@ __thread CPUState *thread_cpu;
 __thread TEB *guest_teb;
 __thread TEB32 *guest_teb32;
 
+char * (* WINAPI p_CharNextA)(const char *ptr);
+
 /* Helper function to read the TEB exception filter chain. */
 uint64_t guest_exception_handler, guest_call_entry;
-
-BOOL (WINAPI *pPathRemoveFileSpecA)(char *path);
-BOOL (WINAPI *pPathRemoveFileSpecW)(WCHAR *path);
 
 bool qemu_cpu_is_self(CPUState *cpu)
 {
@@ -1237,9 +1236,10 @@ static void hook(void *to_hook, const void *replace)
 
     VirtualProtect(hooked_function, sizeof(*hooked_function), old_protect, &old_protect);
 }
+
 int main(int argc, char **argv, char **envp)
 {
-    HMODULE exe_module, shlwapi_module;
+    HMODULE exe_module, user_module;
     int optind, i;
     WCHAR *filenameW;
     int ret;
@@ -1278,22 +1278,16 @@ int main(int argc, char **argv, char **envp)
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
 
-    shlwapi_module = LoadLibraryA("shlwapi.dll");
-    if (!shlwapi_module)
+    user_module = LoadLibraryA("user32.dll");
+    if (!user_module)
     {
-        fprintf(stderr, "Cannot load shlwapi.dll\n");
+        fprintf(stderr, "Cannot load user32.dll\n");
         ExitProcess(1);
     }
-    pPathRemoveFileSpecA = (void *)GetProcAddress(shlwapi_module, "PathRemoveFileSpecA");
-    if (!pPathRemoveFileSpecA)
+    p_CharNextA = (void *)GetProcAddress(user_module, "CharNextA");
+    if (!p_CharNextA)
     {
-        fprintf(stderr, "PathRemoveFileSpecA not found in shlwapi.dll\n");
-        ExitProcess(1);
-    }
-    pPathRemoveFileSpecW = (void *)GetProcAddress(shlwapi_module, "PathRemoveFileSpecW");
-    if (!pPathRemoveFileSpecW)
-    {
-        fprintf(stderr, "PathRemoveFileSpecW not found in shlwapi.dll\n");
+        fprintf(stderr, "CharNextA not found in user32.dll\n");
         ExitProcess(1);
     }
 
@@ -1507,4 +1501,82 @@ NTSTATUS qemu_set_context(HANDLE thread, void *context)
     }
 
     return STATUS_SUCCESS;
+}
+
+/* copypasted from shlwapi. We can't load shlwapi.dll because it will load host shell32.dll, which will register
+ * its window classes, so the shell32.dll inside the guest can't register them any more. */
+BOOL WINAPI my_PathRemoveFileSpecA(LPSTR lpszPath)
+{
+  LPSTR lpszFileSpec = lpszPath;
+  BOOL bModified = FALSE;
+
+  if(lpszPath)
+  {
+    /* Skip directory or UNC path */
+    if (*lpszPath == '\\')
+      lpszFileSpec = ++lpszPath;
+    if (*lpszPath == '\\')
+      lpszFileSpec = ++lpszPath;
+
+    while (*lpszPath)
+    {
+      if(*lpszPath == '\\')
+        lpszFileSpec = lpszPath; /* Skip dir */
+      else if(*lpszPath == ':')
+      {
+        lpszFileSpec = ++lpszPath; /* Skip drive */
+        if (*lpszPath == '\\')
+          lpszFileSpec++;
+      }
+      if (!(lpszPath = p_CharNextA(lpszPath)))
+        break;
+    }
+
+    if (*lpszFileSpec)
+    {
+      *lpszFileSpec = '\0';
+      bModified = TRUE;
+    }
+  }
+  return bModified;
+}
+
+/*************************************************************************
+ * PathRemoveFileSpecW	[SHLWAPI.@]
+ *
+ * See PathRemoveFileSpecA.
+ */
+BOOL WINAPI my_PathRemoveFileSpecW(LPWSTR lpszPath)
+{
+  LPWSTR lpszFileSpec = lpszPath;
+  BOOL bModified = FALSE;
+
+  if(lpszPath)
+  {
+    /* Skip directory or UNC path */
+    if (*lpszPath == '\\')
+      lpszFileSpec = ++lpszPath;
+    if (*lpszPath == '\\')
+      lpszFileSpec = ++lpszPath;
+
+    while (*lpszPath)
+    {
+      if(*lpszPath == '\\')
+        lpszFileSpec = lpszPath; /* Skip dir */
+      else if(*lpszPath == ':')
+      {
+        lpszFileSpec = ++lpszPath; /* Skip drive */
+        if (*lpszPath == '\\')
+          lpszFileSpec++;
+      }
+      lpszPath++;
+    }
+
+    if (*lpszFileSpec)
+    {
+      *lpszFileSpec = '\0';
+      bModified = TRUE;
+    }
+  }
+  return bModified;
 }
