@@ -3440,9 +3440,10 @@ BOOL qemu_is_32_bit_exe(const WCHAR *name)
  * matter. */
 HMODULE qemu_ldr_module_g2h(uint64_t guest)
 {
-    HMODULE ret;
+    HMODULE ret, wrapper;
     WINE_MODREF *modref;
-    WCHAR *name;
+    WCHAR *name, name_wrap[MAX_PATH] = {0};
+    static const WCHAR qemu_[] = {'q','e','m','u','_',0};
     HMODULE guest_mod = QEMU_G2H(guest);
     DWORD le = GetLastError(); /* FIXME: Contemplate using ntdll functions that don't call SetLastError(). */
 
@@ -3477,13 +3478,28 @@ HMODULE qemu_ldr_module_g2h(uint64_t guest)
     WINE_TRACE("Looking for %s.\n", wine_dbgstr_w(name));
     /* Look for a host module of the same name. Note that our own DLLs either have just the DLL name,
      * or are in C:\windows\system32. Both should work for Wine DLLs. */
+    lstrcatW(name_wrap, qemu_);
+    lstrcatW(name_wrap, name);
+    wrapper = GetModuleHandleW(name_wrap);
     ret = GetModuleHandleW(name);
-    if (ret)
+    if (ret && wrapper)
     {
         WINE_TRACE("Found %p for %p, name %s.\n", ret, guest_mod, wine_dbgstr_w(name));
     }
     else
     {
+        /* There's nothing stopping Wine from loading e.g. the host-side ole32.dll even though we are using
+         * a guest build for it. Some DLLs that have host wrappers like advapi32.dll load ole32 though delay
+         * load. Delay load doesn't work with PE DLLs. Assume we do not want the host DLL in this case.
+         *
+         * This still indicates potential problems though. E.g. if the guest calls CoInitialize it won't
+         * make its way through to the host lib. */
+        if (ret)
+        {
+            WINE_FIXME("A host %s has been found, but no wrapper named %s.\n",
+                    wine_dbgstr_w(name), wine_dbgstr_w(name_wrap));
+        }
+
         /* This means that the module we are looking for is not part of a guest-host pair,
          * but is a DLL only loaded in the host, e.g. an application DLL. */
         WINE_TRACE("Did not find %s, using guest module %p.\n", wine_dbgstr_w(name), guest_mod);
