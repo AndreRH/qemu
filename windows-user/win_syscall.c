@@ -93,7 +93,7 @@ BOOL load_host_dlls(BOOL load_msvcrt)
     }
 
     GetModuleFileNameA(NULL, path, MAX_PATH);
-    pPathRemoveFileSpecA(path);
+    my_PathRemoveFileSpecA(path);
     if (is_32_bit)
         strcat(path, "\\qemu_host_dll32\\*");
     else
