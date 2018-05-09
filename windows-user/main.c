@@ -1505,7 +1505,7 @@ NTSTATUS qemu_set_context(HANDLE thread, void *context)
 
 /* copypasted from shlwapi. We can't load shlwapi.dll because it will load host shell32.dll, which will register
  * its window classes, so the shell32.dll inside the guest can't register them any more. */
-BOOL WINAPI my_PathRemoveFileSpecA(LPSTR lpszPath)
+BOOL my_PathRemoveFileSpecA(LPSTR lpszPath)
 {
   LPSTR lpszFileSpec = lpszPath;
   BOOL bModified = FALSE;
@@ -1546,7 +1546,7 @@ BOOL WINAPI my_PathRemoveFileSpecA(LPSTR lpszPath)
  *
  * See PathRemoveFileSpecA.
  */
-BOOL WINAPI my_PathRemoveFileSpecW(LPWSTR lpszPath)
+BOOL my_PathRemoveFileSpecW(LPWSTR lpszPath)
 {
   LPWSTR lpszFileSpec = lpszPath;
   BOOL bModified = FALSE;
