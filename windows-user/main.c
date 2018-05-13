@@ -1416,6 +1416,8 @@ BOOL qemu_DllMain(DWORD reason, void *reserved)
         qemu_log("Informing rcu about disappearing thread.\n");
         thread_cpu = NULL;
         rcu_unregister_thread();
+        qemu_loader_thread_stop();
+        free_teb(guest_teb, guest_teb32);
     }
 
     return TRUE;
