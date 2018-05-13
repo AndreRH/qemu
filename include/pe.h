@@ -37,6 +37,7 @@ struct qemu_pe_image
 void qemu_get_image_info(const HMODULE module, struct qemu_pe_image *info);
 BOOL qemu_call_process_init(void);
 void qemu_loader_thread_init(void);
+void qemu_loader_thread_stop(void);
 
 extern BOOL my_PathRemoveFileSpecA(char *path);
 extern BOOL my_PathRemoveFileSpecW(WCHAR *path);
