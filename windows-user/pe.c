@@ -3127,6 +3127,14 @@ void qemu_loader_thread_init(void)
     RtlReleasePebLock();
 }
 
+void qemu_loader_thread_stop(void)
+{
+    TEB *teb = qemu_getTEB();
+    RtlAcquirePebLock();
+    RemoveEntryList(&teb->TlsLinks);
+    RtlReleasePebLock();
+}
+
 BOOL qemu_FreeLibrary(HMODULE module)
 {
     BOOL                retv = FALSE;
