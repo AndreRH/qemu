@@ -50,6 +50,7 @@
 #include "exec/log.h"
 #include "trace/control.h"
 #include "glib-compat.h"
+#include "translate-all.h"
 
 #include "win_syscall.h"
 #include "pe.h"
@@ -2777,6 +2778,11 @@ static void free_modref( WINE_MODREF *wm )
     WINE_TRACE("Unloaded module %s : %s\n",
                     wine_dbgstr_w(wm->ldr.FullDllName.Buffer),
                     (wm->ldr.Flags & LDR_WINE_INTERNAL) ? "builtin" : "native" );
+
+    mmap_lock();
+    tb_invalidate_phys_range((ULONG_PTR)wm->ldr.BaseAddress,
+            (ULONG_PTR)wm->ldr.BaseAddress + (ULONG_PTR)wm->ldr.SizeOfImage);
+    mmap_unlock();
 
     free_tls_slot( &wm->ldr );
     RtlReleaseActivationContext( wm->ldr.ActivationContext );
