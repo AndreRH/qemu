@@ -146,6 +146,7 @@ static FARPROC find_named_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY *
                                   DWORD exp_size, const char *name, int hint, LPCWSTR load_path );
 
 static NTSTATUS qemu_LdrUnloadDll( HMODULE hModule );
+static WCHAR *MODULE_get_dll_load_path(const WCHAR *module);
 
 /* convert PE image VirtualAddress to Real Address */
 static inline void *get_rva( HMODULE module, DWORD va )
@@ -1526,7 +1527,7 @@ static NTSTATUS WINAPI qemu_LdrGetProcedureAddress(HMODULE module, const ANSI_ST
     else if ((exports = RtlImageDirectoryEntryToData( module, TRUE,
                                                       IMAGE_DIRECTORY_ENTRY_EXPORT, &exp_size )))
     {
-        LPCWSTR load_path = qemu_getTEB()->Peb->ProcessParameters->DllPath.Buffer;
+        LPCWSTR load_path = MODULE_get_dll_load_path(NULL); /* FIXME */
         void *proc = name ? find_named_export( module, exports, exp_size, name->Buffer, -1, load_path )
                           : find_ordinal_export( module, exports, exp_size, ord - exports->Base, load_path, NULL );
         if (proc)
