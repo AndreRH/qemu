@@ -549,6 +549,10 @@ static void cpu_loop(const void *code)
             case EXCP_INTERRUPT:
                 break;
 
+            case EXCP_ATOMIC:
+                cpu_exec_step_atomic(cs);
+                break;
+
             default:
                 fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
                 cpu_dump_state(cs, stderr, fprintf, 0);
