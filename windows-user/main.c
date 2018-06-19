@@ -1418,23 +1418,24 @@ BOOL qemu_DllMain(DWORD reason, void *reserved)
     if (reason == DLL_THREAD_DETACH && thread_cpu)
     {
         CPUX86State *env;
+
+        cpu_list_lock();
+
         qemu_log("Informing rcu about disappearing thread.\n");
-        rcu_unregister_thread();
         qemu_loader_thread_stop();
 
         env = thread_cpu->env_ptr;
         my_free(g2h(env->idt.base));
         my_free(g2h(env->gdt.base));
 
-        /* cpu_create adds CPUs to some parent device. This device holds a reference to the CPU forever,
-         * preventing it from being freed. This parent device thing seems to be part of the CPU hotplug
-         * functionality of qemu-system. I don't think it plays any role in qemu-user, but I am not sure.
-         * See device_set_realized() in qdev.c. */
-        object_unparent(OBJECT(thread_cpu));
+        QTAILQ_REMOVE(&cpus, thread_cpu, node);
         object_unref(OBJECT(thread_cpu));
 
         free_teb(guest_teb, guest_teb32);
         thread_cpu = NULL;
+
+        rcu_unregister_thread();
+        cpu_list_unlock();
     }
 
     return TRUE;
