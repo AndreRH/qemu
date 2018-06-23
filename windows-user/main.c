@@ -1145,44 +1145,31 @@ static void fill_4g_holes(void)
     }
 }
 
-static void free_4g_holes(BOOL free_low_2_gb)
+static void free_4g_holes(BOOL free_high_2_gb)
 {
-    unsigned int i, start, end;
+    unsigned int i, end;
 
-    if (free_low_2_gb)
+    end = ARRAY_SIZE(virtualalloc_blocked) / 2;
+    if (free_high_2_gb)
     {
-        start = 0;
-        end = ARRAY_SIZE(virtualalloc_blocked) / 2;
-    }
-    else if (upper2gb)
-    {
-        VirtualFree((void *)(ULONG_PTR)0x80000000, 0, MEM_RELEASE);
-        start = end = 0;
-    }
-    else
-    {
-        start = ARRAY_SIZE(virtualalloc_blocked) / 2;
-        end = ARRAY_SIZE(virtualalloc_blocked);
+        if (upper2gb)
+            VirtualFree((void *)(ULONG_PTR)0x80000000, 0, MEM_RELEASE);
+        else
+            end = ARRAY_SIZE(virtualalloc_blocked);
     }
 
-    for (i = start; i < end; i++)
+    for (i = 0; i < end; i++)
     {
         if (virtualalloc_blocked[i])
             VirtualFree((void *)(ULONG_PTR)(i * 0x10000), 0, MEM_RELEASE);
     }
 
-    if (free_low_2_gb)
-    {
-        start = 0;
-        end = ARRAY_SIZE(mmap_blocked) / 2;
-    }
-    else if (!upper2gb)
-    {
-        start = ARRAY_SIZE(mmap_blocked) / 2;
+    if (free_high_2_gb)
         end = ARRAY_SIZE(mmap_blocked);
-    }
+    else
+        end = ARRAY_SIZE(mmap_blocked) / 2;
 
-    for (i = start; i < end; i++)
+    for (i = 0; i < end; i++)
     {
         if (mmap_blocked[i])
             munmap((void *)(ULONG_PTR)(i * 0x1000), 0x1000);
@@ -1248,6 +1235,7 @@ int main(int argc, char **argv, char **envp)
     WCHAR *filenameW, exename[MAX_PATH];
     BOOL large_address_aware;
     DWORD_PTR image_base, image_size;
+    void *reserved;
     int ret;
 
     /* FIXME: The order of operations is a mess, especially setting up the TEB and loading the
@@ -1331,7 +1319,12 @@ int main(int argc, char **argv, char **envp)
         block_address_space();
     }
 
-    free_4g_holes(FALSE);
+    free_4g_holes(large_address_aware);
+
+    /* Make sure our TEB and Stack don't accidentally block the exe file. */
+    reserved = VirtualAlloc((void *)image_base, image_size, MEM_RESERVE, PAGE_NOACCESS);
+    if (!reserved)
+        fprintf(stderr, "Could not reserve address for main image, expect trouble later\n");
 
     if (is_32_bit)
     {
@@ -1349,13 +1342,12 @@ int main(int argc, char **argv, char **envp)
 
         init_process_params(argv + optind, filename);
         init_thread_cpu();
-        fprintf(stderr, "32 bit environment set up\n");
+        fprintf(stderr, "32 bit environment set up, Large Address Aware: %s.\n", large_address_aware ? "YES" : "NO");
     }
-
-    free_4g_holes(TRUE);
 
     hook(GetProcAddress(GetModuleHandleA("ntdll"), "LdrFindEntryForAddress"), hook_LdrFindEntryForAddress);
 
+    VirtualFree(reserved, 0, MEM_RELEASE);
     exe_module = qemu_LoadLibrary(filenameW, 0);
     my_free(filenameW);
     if (!exe_module)
