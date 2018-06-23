@@ -345,5 +345,6 @@ struct qemu_CONTEXT_X86
 
 extern uint64_t guest_exception_handler, guest_call_entry;
 extern BOOL is_32_bit;
+extern const WCHAR *qemu_pathname;
 
 #endif /* QEMU_H */

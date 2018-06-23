@@ -56,6 +56,7 @@ unsigned long reserved_va;
 static struct qemu_pe_image image;
 BOOL is_32_bit;
 unsigned long last_brk;
+const WCHAR *qemu_pathname;
 
 PEB guest_PEB;
 PEB32 *guest_PEB32;
@@ -1232,7 +1233,7 @@ int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module, user_module;
     int optind, i;
-    WCHAR *filenameW, exename[MAX_PATH];
+    WCHAR *filenameW, exename[MAX_PATH], *selfpath = NULL;
     BOOL large_address_aware;
     DWORD_PTR image_base, image_size;
     void *reserved;
@@ -1289,6 +1290,17 @@ int main(int argc, char **argv, char **envp)
     tcg_prologue_init(tcg_ctx);
     tcg_region_init();
     init_thread_cpu();
+
+    i = MAX_PATH;
+    do
+    {
+        HeapFree(GetProcessHeap(), 0, selfpath);
+        i *= 2;
+        selfpath = HeapAlloc(GetProcessHeap(), 0, i * sizeof(*selfpath));
+        SetLastError(0);
+        GetModuleFileNameW(NULL, selfpath, i);
+    } while(GetLastError());
+    qemu_pathname = selfpath;
 
     init_process_params(argv + optind, filename);
 
