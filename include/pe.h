@@ -13,7 +13,8 @@ NTSTATUS WINAPI hook_LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
 BOOL qemu_DisableThreadLibraryCalls(HMODULE mod);
 BOOL qemu_get_ldr_module(HANDLE process, HMODULE mod, void **ldr);
 void *qemu_RtlPcToFileHeader(void *pc, void **address);
-BOOL qemu_is_32_bit_exe(const WCHAR *name);
+BOOL qemu_get_exe_properties(const WCHAR *path, WCHAR *exename, size_t name_len, BOOL *is_32_bit, BOOL *large_address_aware,
+        DWORD_PTR *base, DWORD_PTR *size);
 HMODULE qemu_ldr_module_g2h(uint64_t guest);
 
 TEB *qemu_getTEB(void);

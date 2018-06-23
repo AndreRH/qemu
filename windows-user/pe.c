@@ -3444,21 +3444,46 @@ BOOL qemu_get_ldr_module(HANDLE process, HMODULE mod, void **ldr)
 }
 
 /* If the file is not a valid exe file just return 64 bit. We'll terminate later. */
-BOOL qemu_is_32_bit_exe(const WCHAR *name)
+BOOL qemu_get_exe_properties(const WCHAR *path, WCHAR *exename, size_t name_len, BOOL *is_32_bit,
+        BOOL *large_address_aware, DWORD_PTR *base, DWORD_PTR *size)
 {
-    HMODULE module = qemu_LoadLibrary(name, LOAD_LIBRARY_AS_DATAFILE);
+    HMODULE module = qemu_LoadLibrary(path, LOAD_LIBRARY_AS_DATAFILE);
     IMAGE_NT_HEADERS *hdr;
     BOOL ret = FALSE;
+    IMAGE_OPTIONAL_HEADER32 *hdr32 = NULL;
+    IMAGE_OPTIONAL_HEADER64 *hdr64 = NULL;
 
     if (!module)
         return FALSE;
 
     hdr = RtlImageNtHeader((HMODULE)((ULONG_PTR)module - 1));
     if (hdr)
-        ret = hdr->FileHeader.Machine == IMAGE_FILE_MACHINE_I386;
+    {
+        if (hdr->FileHeader.Machine == IMAGE_FILE_MACHINE_I386)
+        {
+            WINE_TRACE("%s is a 32 bit app\n", wine_dbgstr_w(path));
+
+            hdr32 = (IMAGE_OPTIONAL_HEADER32 *)&hdr->OptionalHeader;
+            *is_32_bit = TRUE;
+            *base = hdr32->ImageBase;
+            *size = ROUND_SIZE(hdr32->SizeOfImage);
+        }
+        else
+        {
+            WINE_TRACE("%s is a 64 bit app\n", wine_dbgstr_w(path));
+
+            hdr64 = &hdr->OptionalHeader;
+            *is_32_bit = FALSE;
+            *base = hdr64->ImageBase;
+            *size = ROUND_SIZE(hdr64->SizeOfImage);
+        }
+
+        *large_address_aware = hdr->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE;
+
+        ret = TRUE;
+    }
 
     qemu_FreeLibrary(module);
-    WINE_TRACE("%s is a %u bit app\n", wine_dbgstr_w(name), ret ? 32 : 64);
     return ret;
 }
 

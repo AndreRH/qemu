@@ -1245,7 +1245,9 @@ int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module, user_module;
     int optind, i;
-    WCHAR *filenameW;
+    WCHAR *filenameW, exename[MAX_PATH];
+    BOOL large_address_aware;
+    DWORD_PTR image_base, image_size;
     int ret;
 
     /* FIXME: The order of operations is a mess, especially setting up the TEB and loading the
@@ -1302,7 +1304,8 @@ int main(int argc, char **argv, char **envp)
 
     init_process_params(argv + optind, filename);
 
-    is_32_bit = qemu_is_32_bit_exe(filenameW);
+    qemu_get_exe_properties(filenameW, exename, sizeof(exename), &is_32_bit,
+            &large_address_aware, &image_base, &image_size);
 
     if (!load_host_dlls(FALSE))
     {
