@@ -3452,9 +3452,13 @@ BOOL qemu_get_exe_properties(const WCHAR *path, WCHAR *exename, size_t name_len,
     BOOL ret = FALSE;
     IMAGE_OPTIONAL_HEADER32 *hdr32 = NULL;
     IMAGE_OPTIONAL_HEADER64 *hdr64 = NULL;
+    static const WCHAR dotEXE[] = {'.','d','l','l',0};
 
     if (!module)
         return FALSE;
+
+    if (!SearchPathW( NULL, path, dotEXE, name_len, exename, NULL ))
+        WINE_ERR("Could not figure out the full .exe path, but the loader code found it. Re-think this logic...\n");
 
     hdr = RtlImageNtHeader((HMODULE)((ULONG_PTR)module - 1));
     if (hdr)
@@ -3539,6 +3543,12 @@ HMODULE qemu_ldr_module_g2h(uint64_t guest)
     lstrcatW(name_wrap, name);
     wrapper = GetModuleHandleW(name_wrap);
     ret = GetModuleHandleW(name);
+
+    /* Ignore ourselves. We replaced the .exe name with the guest name, so we'll find ourselves
+     * if we look for the guest .exe. */
+    if (ret == GetModuleHandleW(NULL))
+        ret = NULL;
+
     if (ret && wrapper)
     {
         WINE_TRACE("Found %p for %p, name %s.\n", ret, guest_mod, wine_dbgstr_w(name));
