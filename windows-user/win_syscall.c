@@ -52,6 +52,11 @@ static void qemu_set_call_entry(uint64_t call_entry)
     guest_call_entry = call_entry;
 }
 
+static const WCHAR *qemu_getpath(void)
+{
+    return qemu_pathname;
+}
+
 static const struct qemu_ops ops =
 {
     qemu_execute,
@@ -71,6 +76,7 @@ static const struct qemu_ops ops =
     qemu_DllMain,
     qemu_set_context,
     qemu_ldr_module_g2h,
+    qemu_getpath,
 };
 
 BOOL load_host_dlls(BOOL load_msvcrt)
@@ -92,7 +98,7 @@ BOOL load_host_dlls(BOOL load_msvcrt)
         memset(dlls, 0, sizeof(*dlls) * dll_count);
     }
 
-    GetModuleFileNameA(NULL, path, MAX_PATH);
+    WideCharToMultiByte(CP_ACP, 0, qemu_pathname, -1, path, sizeof(path), NULL, NULL);
     my_PathRemoveFileSpecA(path);
     if (is_32_bit)
         strcat(path, "\\qemu_host_dll32\\*");

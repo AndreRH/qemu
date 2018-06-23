@@ -2137,7 +2137,7 @@ static WCHAR *get_guest_dll_path(void)
 
     cached_32 = is_32_bit;
     cached_path = HeapAlloc(GetProcessHeap(), 0, (MAX_PATH + 12) * sizeof(*cached_path));
-    GetModuleFileNameW(NULL, cached_path, MAX_PATH);
+    memcpy(cached_path, qemu_pathname, (lstrlenW(qemu_pathname) + 1 ) * sizeof(*qemu_pathname));
     my_PathRemoveFileSpecW(cached_path);
     if (is_32_bit)
         lstrcatW(cached_path, qemu_guest_dll32);
