@@ -1238,6 +1238,9 @@ int main(int argc, char **argv, char **envp)
     DWORD_PTR image_base, image_size;
     void *reserved;
     int ret;
+    LDR_MODULE *self_module;
+    ULONG_PTR magic;
+    NTSTATUS nts;
 
     /* FIXME: The order of operations is a mess, especially setting up the TEB and loading the
      * guest binary. */
@@ -1304,8 +1307,20 @@ int main(int argc, char **argv, char **envp)
 
     init_process_params(argv + optind, filename);
 
-    qemu_get_exe_properties(filenameW, exename, sizeof(exename), &is_32_bit,
-            &large_address_aware, &image_base, &image_size);
+    if (!qemu_get_exe_properties(filenameW, exename, sizeof(exename) / sizeof(*exename), &is_32_bit,
+            &large_address_aware, &image_base, &image_size))
+    {
+        fprintf(stderr, "Failed to load \"%s\", last error %u.\n", filename, GetLastError());
+        ExitProcess(EXIT_FAILURE);
+    }
+
+    LdrLockLoaderLock( 0, NULL, &magic );
+    nts = LdrFindEntryForAddress( NtCurrentTeb()->Peb->ImageBaseAddress, &self_module );
+    if (nts)
+        fprintf(stderr, "Could not find myself.\n");
+    self_module->FullDllName.Buffer = exename;
+    self_module->FullDllName.Length = strlenW(exename) * sizeof(*exename);
+    LdrUnlockLoaderLock( 0, magic );
 
     if (!load_host_dlls(FALSE))
     {
