@@ -46,6 +46,8 @@
 #include "win_syscall.h"
 #include "pe.h"
 
+WINE_DEFAULT_DEBUG_CHANNEL(qemu);
+
 char *exec_path;
 
 int singlestep;
@@ -534,7 +536,7 @@ static void cpu_loop(const void *code)
                     ExitProcess(1);
                 }
 
-                fprintf(stderr, "Got a page fault in user code, resuming execution at exception handler 0x%lx, rsp %p.\n",
+                WINE_ERR("Got a page fault in user code, resuming execution at exception handler 0x%lx, rsp %p.\n",
                         guest_exception_handler, (void *)env->regs[R_ESP]);
                 cpu_dump_state(cs, stderr, fprintf, 0);
 
@@ -555,7 +557,7 @@ static void cpu_loop(const void *code)
                 break;
 
             default:
-                fprintf(stderr, "Unhandled trap %x, exiting.\n", trapnr);
+                WINE_ERR("Unhandled trap %x, exiting.\n", trapnr);
                 cpu_dump_state(cs, stderr, fprintf, 0);
                 ExitProcess(255);
         }
@@ -572,7 +574,7 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
 
     if (!code)
     {
-        fprintf(stderr, "Attempting to execute NULL.\n");
+        WINE_ERR("Attempting to execute NULL.\n");
         ExitProcess(1);
     }
 
@@ -619,7 +621,7 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
     cs = thread_cpu;
     if (!cs)
     {
-        qemu_log("Initializing new CPU for thread %x.\n", GetCurrentThreadId());
+        WINE_TRACE("Initializing new CPU for thread %x.\n", GetCurrentThreadId());
         rcu_register_thread();
         tcg_register_thread();
         init_thread_cpu();
@@ -645,12 +647,12 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
         *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
     }
 
-    qemu_log("Going to call guest code %p.\n", code);
+    WINE_TRACE("Going to call guest code %p.\n", code);
     cpu_loop(code);
 
     if (backup_regs[R_ESP] - 0x20 != env->regs[R_ESP])
     {
-        fprintf(stderr, "Stack pointer is 0x%lx, expected 0x%lx, longjump or unwind going on?\n",
+        WINE_ERR("Stack pointer is 0x%lx, expected 0x%lx, longjump or unwind going on?\n",
                 backup_regs[R_ESP] - 0x20, env->regs[R_ESP]);
         ExitProcess(1);
     }
@@ -659,7 +661,7 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
     memcpy(env->regs, backup_regs, sizeof(backup_regs));
     env->eip = backup_eip;
 
-    qemu_log("retval %lx.\n", retval);
+    WINE_TRACE("retval %lx.\n", retval);
     return retval;
 }
 
@@ -1417,14 +1419,14 @@ int main(int argc, char **argv, char **envp)
 
     signal_init();
 
-    qemu_log("CPU Setup done\n");
+    WINE_TRACE("CPU Setup done\n");
 
     if (qemu_LdrInitializeThunk())
     {
         fprintf(stderr, "Process initialization failed.\n");
         ExitProcess(EXIT_FAILURE);
     }
-    qemu_log("Process init done.\n");
+    WINE_TRACE("Process init done.\n");
 
     /* Should not return, guest_call_entry calls ExitProcess if need be. */
     ret = qemu_execute(QEMU_G2H(guest_call_entry), QEMU_H2G(image.entrypoint));
@@ -1435,7 +1437,7 @@ int main(int argc, char **argv, char **envp)
 
 BOOL qemu_DllMain(DWORD reason, void *reserved)
 {
-    qemu_log("qemu DllMain(%u).\n", reason);
+    WINE_TRACE("qemu DllMain(%u).\n", reason);
 
     if (reason == DLL_THREAD_DETACH && thread_cpu)
     {
@@ -1443,7 +1445,7 @@ BOOL qemu_DllMain(DWORD reason, void *reserved)
 
         cpu_list_lock();
 
-        qemu_log("Informing rcu about disappearing thread.\n");
+        WINE_TRACE("Informing rcu about disappearing thread.\n");
         qemu_loader_thread_stop();
 
         env = thread_cpu->env_ptr;
