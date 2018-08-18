@@ -32,6 +32,7 @@
 #include "pe.h"
 
 WINE_DECLARE_DEBUG_CHANNEL(heap);
+WINE_DEFAULT_DEBUG_CHANNEL(qemu);
 
 struct load_host_dlls
 {
@@ -189,7 +190,7 @@ void do_syscall(struct qemu_syscall *call)
     uint32_t dll = call->id >> 32;
     uint32_t func = call->id & 0xffffffff;
 
-    qemu_log_mask(LOG_WIN32, "Handling syscall %16lx.\n", call->id);
+    WINE_TRACE("Handling syscall %16lx.\n", call->id);
 
     if (WINE_WARN_ON(heap) && !HeapValidate(GetProcessHeap(), 0, NULL))
     {
