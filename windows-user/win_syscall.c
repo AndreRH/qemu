@@ -77,6 +77,7 @@ static const struct qemu_ops ops =
     qemu_DllMain,
     qemu_set_context,
     qemu_ldr_module_g2h,
+    qemu_ldr_module_h2g,
     qemu_getpath,
 };
 
