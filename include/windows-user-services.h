@@ -294,6 +294,7 @@ struct qemu_ops
     BOOL (*qemu_DllMain)(DWORD reason, void *reserved);
     NTSTATUS (*qemu_set_context)(HANDLE thread, void *ctx);
     HMODULE (*qemu_module_g2h)(uint64_t guest);
+    uint64_t (*qemu_module_h2g)(HMODULE host);
     const WCHAR *(*qemu_getpath)(void);
 };
 
