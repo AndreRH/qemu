@@ -115,6 +115,9 @@ static const char * const reason_names[] =
 };
 
 static const WCHAR dllW[] = {'.','d','l','l',0};
+static const WCHAR ntdllW[]    = {'n','t','d','l','l','.','d','l','l',0};
+static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
+static const WCHAR user32W[] = {'u','s','e','r','3','2','.','d','l','l',0};
 
 /* internal representation of 32bit modules. per process. */
 typedef struct _wine_modref
@@ -738,8 +741,6 @@ static NTSTATUS create_module_activation_context( LDR_MODULE *module )
  */
 static BOOL is_dll_native_subsystem( HMODULE module, const IMAGE_NT_HEADERS *nt, LPCWSTR filename )
 {
-    static const WCHAR ntdllW[]    = {'n','t','d','l','l','.','d','l','l',0};
-    static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
     const IMAGE_IMPORT_DESCRIPTOR *imports;
     DWORD i, size;
     WCHAR buffer[16];
@@ -3575,4 +3576,36 @@ HMODULE qemu_ldr_module_g2h(uint64_t guest)
 
     SetLastError(le);
     return ret;
+}
+
+uint64_t qemu_ldr_module_h2g(HMODULE host)
+{
+    WINE_TRACE("Looking for %p.\n", host);
+    HMODULE guest = NULL;
+
+    /* OK, I am not entirely sure what we want here in general. What started this function
+     * is the user32 class test, which expects GetClassInfo to return a class HINSTANCE pointing
+     * to kernel32 in some cases. So we want to translate host kernel32 to guest kernel32 here.
+     * The same might need to be done for ntdll and user32 at some point.
+     *
+     * So for now just single out kernel32. */
+    if (!host)
+        return 0;
+
+    if (host == GetModuleHandleW(kernel32W))
+    {
+        guest = qemu_GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, kernel32W);
+        if (!guest)
+            WINE_ERR("Did not find guest kernel32.\n");
+        return QEMU_H2G(guest);
+    }
+    else if (host == GetModuleHandleW(user32W))
+    {
+        guest = qemu_GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, user32W);
+        if (!guest)
+            WINE_ERR("Did not find guest user32.\n");
+        return QEMU_H2G(guest);
+    }
+
+    return QEMU_H2G(host);
 }
