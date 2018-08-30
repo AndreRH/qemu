@@ -16,6 +16,7 @@ void *qemu_RtlPcToFileHeader(void *pc, void **address);
 BOOL qemu_get_exe_properties(const WCHAR *path, WCHAR *exename, size_t name_len, BOOL *is_32_bit, BOOL *large_address_aware,
         DWORD_PTR *base, DWORD_PTR *size);
 HMODULE qemu_ldr_module_g2h(uint64_t guest);
+uint64_t qemu_ldr_module_h2g(HMODULE host);
 
 TEB *qemu_getTEB(void);
 TEB32 *qemu_getTEB32(void);
