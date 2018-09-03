@@ -571,6 +571,7 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
     uint64_t backup_eip, retval;
     target_ulong backup_regs[CPU_NB_REGS];
     static char *ret_code;
+    TEB *teb = NtCurrentTeb();
 
     if (!code)
     {
@@ -639,16 +640,23 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
         env->regs[R_ESP] -= 0x24; /* Keeps the longjmp detection simpler */
         /* Write the address of our return code onto the stack. */
         *(uint32_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
+        guest_teb32->LastErrorValue = teb->LastErrorValue;
     }
     else
     {
         env->regs[R_ESP] -= 0x28; /* Reserve 32 bytes + 8 for the return address. */
         /* Write the address of our return code onto the stack. */
         *(uint64_t *)g2h(env->regs[R_ESP]) = h2g(ret_code);
+        guest_teb->LastErrorValue = teb->LastErrorValue;
     }
 
     WINE_TRACE("Going to call guest code %p.\n", code);
     cpu_loop(code);
+
+    if (is_32_bit)
+        teb->LastErrorValue = guest_teb32->LastErrorValue;
+    else
+        teb->LastErrorValue = guest_teb->LastErrorValue;
 
     if (backup_regs[R_ESP] - 0x20 != env->regs[R_ESP])
     {
