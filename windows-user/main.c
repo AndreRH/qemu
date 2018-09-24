@@ -328,8 +328,6 @@ static void init_thread_cpu(void)
         guest_teb32->Tib.StackLimit = (qemu_ptr)h2g(stack);
     }
 
-    qemu_loader_thread_init();
-
     /* FIXME: Figure out how to free the CPU, stack, TEB and IDT on thread exit. */
     thread_cpu = cpu;
 }
@@ -1303,6 +1301,7 @@ int main(int argc, char **argv, char **envp)
     tcg_prologue_init(tcg_ctx);
     tcg_region_init();
     init_thread_cpu();
+    qemu_loader_thread_init();
 
     i = MAX_PATH;
     do
@@ -1379,6 +1378,7 @@ int main(int argc, char **argv, char **envp)
 
         init_process_params(argv + optind, filename);
         init_thread_cpu();
+        qemu_loader_thread_init();
         fprintf(stderr, "32 bit environment set up, Large Address Aware: %s.\n", large_address_aware ? "YES" : "NO");
     }
 
