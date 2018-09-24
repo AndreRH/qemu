@@ -1348,6 +1348,7 @@ NTSTATUS MODULE_DllThreadAttach( LPVOID lpReserved )
     if (process_detaching) return STATUS_SUCCESS;
 
     RtlEnterCriticalSection( &loader_section );
+    qemu_loader_thread_init();
 
     if ((status = alloc_thread_tls()) != STATUS_SUCCESS) goto done;
 
