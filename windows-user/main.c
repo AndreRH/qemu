@@ -1055,6 +1055,10 @@ static void block_address_space(void)
 {
     void *map;
     unsigned long size = 1UL << 63UL;
+    void (* WINAPI p__wine_RtlSetFirewallHeap)(BOOL firewall);
+    HMODULE ntdll = GetModuleHandleA("ntdll");
+
+    p__wine_RtlSetFirewallHeap = (void *)GetProcAddress(ntdll, "__wine_RtlSetFirewallHeap");
 
     /* mmap as much as possible. */
     while(size >= 4096)
@@ -1104,6 +1108,12 @@ static void block_address_space(void)
         } while(map);
         size >>= 1;
     }
+
+    if(p__wine_RtlSetFirewallHeap)
+        p__wine_RtlSetFirewallHeap(TRUE);
+    else
+        WINE_ERR("__wine_RtlSetFirewallHeap not found, expect problems.\n");
+
 }
 
 static char virtualalloc_blocked[0x100000000 / 0x10000];
