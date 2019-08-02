@@ -973,6 +973,7 @@ static void init_process_params(char **argv, const char *filenme)
     build_command_line(argv);
     guest_PEB.ProcessParameters = &process_params;
     guest_PEB.LdrData = &guest_ldr;
+    guest_PEB.ProcessHeap = GetProcessHeap();
 
     /* FIXME: If no explicit title is given WindowTitle and ImagePathName are the same, except
      * that WindowTitle has the .so ending removed. This could be used for a more reliable check.
@@ -1019,6 +1020,7 @@ static void init_process_params(char **argv, const char *filenme)
         process_params32 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*process_params32));
 
         guest_PEB32->ProcessParameters = (ULONG_PTR)process_params32;
+        guest_PEB32->ProcessHeap = (ULONG_PTR)GetProcessHeap();
         /* TODO: Loader data? Will be tricky as I have to make pe.c update 32 bit pointers. */
 
         /* FIXME: This may be broken if we're taking it from Wine's PEB. */
