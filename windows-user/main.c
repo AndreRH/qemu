@@ -1343,7 +1343,7 @@ int main(int argc, char **argv, char **envp)
     self_module->FullDllName.Length = strlenW(exename) * sizeof(*exename);
     LdrUnlockLoaderLock( 0, magic );
 
-    if (!load_host_dlls(FALSE))
+    if (!load_host_dlls())
     {
         fprintf(stderr, "Failed to load host DLLs\n");
         ExitProcess(EXIT_FAILURE);
@@ -1406,12 +1406,6 @@ int main(int argc, char **argv, char **envp)
     }
     qemu_get_image_info(exe_module, &image);
     guest_PEB.ImageBaseAddress = exe_module;
-
-    if (!load_host_dlls(TRUE))
-    {
-        fprintf(stderr, "Failed to load host DLLs\n");
-        ExitProcess(EXIT_FAILURE);
-    }
 
     if (image.stack_reserve != DEFAULT_STACK_SIZE)
     {
