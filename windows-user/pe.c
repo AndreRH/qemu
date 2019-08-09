@@ -2163,6 +2163,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
     WCHAR *file_part, *ext, *dllname, *sysdir, *qemu_sysdir = get_guest_dll_path();
     ULONG len, sysdirlen;
     BOOLEAN convert;
+    static const WCHAR fusionW[] = {'f','u','s','i','o','n','.','d','l','l',0};
 
     /* first append .dll if needed */
 
@@ -2271,8 +2272,31 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
     /* absolute path name, or relative path name but not found above */
 
     /* Load anything that is placed in system32 from qemu's guest DLL dir instead, but
-     *  pretend that the file is from system32. */
-    if (!strncmpiW(libname, sysdir, sysdirlen - 1))
+     *  pretend that the file is from system32.
+     *
+     * Also HACK: Load fusion.dll from qemu's guest DLL dir no matter where it is found.
+     * .NET places it in C:\windows\Microsoft.NET\Framework\fusion.dll and native fusion
+     * does not work because it tries to create reparse points. We need Wine's fusion.
+     *
+     * This thing should be made more generic to have a switch between native, wine PE build,
+     * hangover wrapper. */
+    if (strstrW(libname, fusionW))
+    {
+        WCHAR *filename2;
+        convert = RtlDosPathNameToNtPathName_U( libname, &nt_name_orig, &file_part, NULL );
+
+        len = strlenW(qemu_sysdir) + strlenW(fusionW) + 1;
+        filename2 = my_alloc(len * sizeof(*filename2));
+        strcpyW(filename2, qemu_sysdir);
+        strcatW(filename2, fusionW);
+
+        WINE_TRACE("Loading %s instead of %s\n", wine_dbgstr_w(filename2), wine_dbgstr_w(libname));
+
+        /* FIXME: File_part? We'll probably only get here if the original path was absolute anyway. */
+        convert = RtlDosPathNameToNtPathName_U( filename2, &nt_name, &file_part, NULL );
+        my_free(filename2);
+    }
+    else if (!strncmpiW(libname, sysdir, sysdirlen - 1))
     {
         WCHAR *filename2;
 
