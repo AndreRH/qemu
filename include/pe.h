@@ -13,10 +13,12 @@ NTSTATUS WINAPI hook_LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
 BOOL qemu_DisableThreadLibraryCalls(HMODULE mod);
 BOOL qemu_get_ldr_module(HANDLE process, HMODULE mod, void **ldr);
 void *qemu_RtlPcToFileHeader(void *pc, void **address);
-BOOL qemu_get_exe_properties(const WCHAR *path, WCHAR *exename, size_t name_len, BOOL *is_32_bit, BOOL *large_address_aware,
-        DWORD_PTR *base, DWORD_PTR *size);
+BOOL qemu_get_exe_properties(const WCHAR *path, WCHAR *exename, size_t name_len, BOOL *is_32_bit,
+        BOOL *large_address_aware, DWORD_PTR *base, DWORD_PTR *size);
 HMODULE qemu_ldr_module_g2h(uint64_t guest);
 uint64_t qemu_ldr_module_h2g(HMODULE host);
+void* qemu_LdrResolveDelayLoadedAPI( void* base, const IMAGE_DELAYLOAD_DESCRIPTOR* desc,
+        void *dllhook, void *syshook, IMAGE_THUNK_DATA *addr, ULONG flags );
 
 TEB *qemu_getTEB(void);
 TEB32 *qemu_getTEB32(void);
@@ -26,9 +28,6 @@ NTSTATUS qemu_LdrInitializeThunk(void);
  * of ntdll/loader.c, and they sound important, so keep them as dead code for now. */
 NTSTATUS MODULE_DllThreadAttach( LPVOID lpReserved );
 NTSTATUS WINAPI qemu_LdrEnumerateLoadedModules( void *unknown, void *callback, void *context );
-void* WINAPI qemu_LdrResolveDelayLoadedAPI( void* base, const IMAGE_DELAYLOAD_DESCRIPTOR* desc,
-                                       PDELAYLOAD_FAILURE_DLL_CALLBACK dllhook, void* syshook,
-                                       IMAGE_THUNK_DATA* addr, ULONG flags );
 
 struct qemu_pe_image
 {
