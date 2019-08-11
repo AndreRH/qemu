@@ -72,6 +72,7 @@ static const struct qemu_ops ops =
     qemu_set_call_entry,
     qemu_FindEntryForAddress,
     qemu_DisableThreadLibraryCalls,
+    qemu_LdrResolveDelayLoadedAPI,
     qemu_get_ldr_module,
     qemu_RtlPcToFileHeader,
     qemu_DllMain,

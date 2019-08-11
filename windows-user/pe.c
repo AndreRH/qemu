@@ -2654,66 +2654,87 @@ static NTSTATUS qemu_LdrQueryImageFileExecutionOptions( const UNICODE_STRING *ke
 /****************************************************************************
  *              LdrResolveDelayLoadedAPI   (NTDLL.@)
  */
-void* WINAPI qemu_LdrResolveDelayLoadedAPI( void* base, const IMAGE_DELAYLOAD_DESCRIPTOR* desc,
-                                       PDELAYLOAD_FAILURE_DLL_CALLBACK dllhook, void* syshook,
-                                       IMAGE_THUNK_DATA* addr, ULONG flags )
+void* qemu_LdrResolveDelayLoadedAPI( void* base, const IMAGE_DELAYLOAD_DESCRIPTOR* desc,
+        void *dllhook, void* syshook, IMAGE_THUNK_DATA* addr, ULONG flags )
 {
-    IMAGE_THUNK_DATA *pIAT, *pINT;
+    IMAGE_THUNK_DATA64 *pIAT64, *pINT64;
+    IMAGE_THUNK_DATA32 *pIAT32, *pINT32;
     DELAYLOAD_INFO delayinfo;
     UNICODE_STRING mod;
     const CHAR* name;
-    HMODULE *phmod;
+    HMODULE *phmod, mod64;
     NTSTATUS nts;
     FARPROC fp;
     DWORD id;
+    ULONGLONG ord;
 
     WINE_FIXME("(%p, %p, %p, %p, %p, 0x%08x), partial stub\n", base, desc, dllhook, syshook, addr, flags);
 
     phmod = get_rva(base, desc->ModuleHandleRVA);
-    pIAT = get_rva(base, desc->ImportAddressTableRVA);
-    pINT = get_rva(base, desc->ImportNameTableRVA);
+    pIAT64 = get_rva(base, desc->ImportAddressTableRVA);
+    pIAT32 = (IMAGE_THUNK_DATA32 *)pIAT64;
+    pINT64 = get_rva(base, desc->ImportNameTableRVA);
+    pINT32 = (IMAGE_THUNK_DATA32 *)pINT64;
     name = get_rva(base, desc->DllNameRVA);
-    id = addr - pIAT;
+    id = is_32_bit ? ((IMAGE_THUNK_DATA32 *)addr) - pIAT32 : ((IMAGE_THUNK_DATA64 *)addr) - pIAT64;
 
-    if (!*phmod)
+    mod64 = is_32_bit ? (HMODULE)(ULONG_PTR)(*((qemu_ptr *)phmod)) : *phmod;
+    if (!mod64)
     {
+        LPCWSTR load_path = MODULE_get_dll_load_path(NULL); /* FIXME */
+
         if (!RtlCreateUnicodeStringFromAsciiz(&mod, name))
         {
             nts = STATUS_NO_MEMORY;
             goto fail;
         }
-        nts = qemu_LdrLoadDll(NULL, 0, &mod, phmod);
+        nts = qemu_LdrLoadDll(load_path, 0, &mod, &mod64);
         RtlFreeUnicodeString(&mod);
         if (nts) goto fail;
+        if (is_32_bit)
+            *((qemu_ptr *)phmod) = (ULONG_PTR)mod64;
+        else
+            *phmod = mod64;
     }
 
-    if (IMAGE_SNAP_BY_ORDINAL(pINT[id].u1.Ordinal))
-        nts = qemu_LdrGetProcedureAddress(*phmod, NULL, LOWORD(pINT[id].u1.Ordinal), (void**)&fp);
+    ord = is_32_bit ? pINT32[id].u1.Ordinal : pINT64[id].u1.Ordinal;
+
+    if (IMAGE_SNAP_BY_ORDINAL(ord))
+        nts = qemu_LdrGetProcedureAddress(mod64, NULL, LOWORD(ord), (void**)&fp);
     else
     {
-        const IMAGE_IMPORT_BY_NAME* iibn = get_rva(base, pINT[id].u1.AddressOfData);
+        const IMAGE_IMPORT_BY_NAME* iibn;
         ANSI_STRING fnc;
 
+        if (is_32_bit)
+            iibn = get_rva(base, pINT32[id].u1.AddressOfData);
+        else
+            iibn = get_rva(base, pINT64[id].u1.AddressOfData);
+
         RtlInitAnsiString(&fnc, (char*)iibn->Name);
-        nts = qemu_LdrGetProcedureAddress(*phmod, &fnc, 0, (void**)&fp);
+        nts = qemu_LdrGetProcedureAddress(mod64, &fnc, 0, (void**)&fp);
     }
     if (!nts)
     {
-        pIAT[id].u1.Function = (ULONG_PTR)fp;
+        if (is_32_bit)
+            pIAT32[id].u1.Function = (ULONG_PTR)fp;
+        else
+            pIAT64[id].u1.Function = (ULONG_PTR)fp;
         return fp;
     }
 
 fail:
+    /* FIXME: This has 32/64 bit specific stuff. Currently the caller will write a WINE_FIXME. */
     delayinfo.Size = sizeof(delayinfo);
     delayinfo.DelayloadDescriptor = desc;
     delayinfo.ThunkAddress = addr;
     delayinfo.TargetDllName = name;
-    delayinfo.TargetApiDescriptor.ImportDescribedByName = !IMAGE_SNAP_BY_ORDINAL(pINT[id].u1.Ordinal);
-    delayinfo.TargetApiDescriptor.Description.Ordinal = LOWORD(pINT[id].u1.Ordinal);
+    delayinfo.TargetApiDescriptor.ImportDescribedByName = !IMAGE_SNAP_BY_ORDINAL(pINT64[id].u1.Ordinal);
+    delayinfo.TargetApiDescriptor.Description.Ordinal = LOWORD(pINT64[id].u1.Ordinal);
     delayinfo.TargetModuleBase = *phmod;
     delayinfo.Unused = NULL;
     delayinfo.LastError = nts;
-    return dllhook(4, &delayinfo);
+    return ((PDELAYLOAD_FAILURE_DLL_CALLBACK)dllhook)(4, &delayinfo);
 }
 
 #if 0

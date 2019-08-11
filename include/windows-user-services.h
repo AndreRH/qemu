@@ -289,6 +289,8 @@ struct qemu_ops
     void (*qemu_set_call_entry)(uint64_t call_entry);
     BOOL (*qemu_FindEntryForAddress)(void *addr, HMODULE *mod);
     BOOL (*qemu_DisableThreadLibraryCalls)(HMODULE mod);
+    void *(*qemu_LdrResolveDelayLoadedAPI)(void* base, const IMAGE_DELAYLOAD_DESCRIPTOR* desc,
+            void *dllhook, void *syshook, IMAGE_THUNK_DATA* addr, ULONG flags);
     BOOL (*qemu_get_ldr_module)(HANDLE process, HMODULE mod, void **ldr);
     void *(*qemu_RtlPcToFileHeader)(void *pc, void **address);
     BOOL (*qemu_DllMain)(DWORD reason, void *reserved);
