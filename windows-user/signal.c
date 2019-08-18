@@ -26,7 +26,7 @@
 static LONG WINAPI exception_handler(EXCEPTION_POINTERS *exception)
 {
     CPUX86State *env = thread_cpu->env_ptr;
-    CPUState *cpu = ENV_GET_CPU(env);
+    CPUState *cpu = env_cpu(env);
     siginfo_t info;
 
     if (!cpu || !cpu->running)
