@@ -42,6 +42,7 @@
 #include "exec/log.h"
 #include "trace/control.h"
 #include "glib-compat.h"
+#include "qemu-common.h"
 
 #include "win_syscall.h"
 #include "pe.h"
@@ -379,7 +380,7 @@ static void cpu_env_to_context_64(qemu_CONTEXT_X86_64 *context, CPUX86State *env
     context->Rip = env->eip;
 
     /* Floating point. */
-    x86_cpu_xsave_all_areas(x86_env_get_cpu(env), &buf);
+    x86_cpu_xsave_all_areas(env_archcpu(env), &buf);
     memcpy(&context->FltSave, &buf.legacy, sizeof(context->FltSave));
     /* This is implicitly set to 0 by x86_cpu_xsave_all_areas (via memset),
      * but the fxsave implementation in target/i386/fpu_helper.c sets it
