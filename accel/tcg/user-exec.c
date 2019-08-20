@@ -229,7 +229,7 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 #define TRAP_sig(context)     ((context)->uc_mcontext.mc_trapno)
 #define ERROR_sig(context)    ((context)->uc_mcontext.mc_err)
 #define MASK_sig(context)     ((context)->uc_sigmask)
-#elif defined(WIN32)
+#elif 1
 #include <windows.h>
 #define PC_sig(context)       (context->ContextRecord->Rip)
 /* FIXME: Trick these things into somehow making the 2nd parameter is_write. */
@@ -249,7 +249,7 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 {
     siginfo_t *info = pinfo;
     unsigned long pc;
-#if defined(WIN32)
+#if 1
     EXCEPTION_POINTERS *uc = puc;
 #elif defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
     ucontext_t *uc = puc;
