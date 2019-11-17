@@ -2668,7 +2668,7 @@ void* qemu_LdrResolveDelayLoadedAPI( void* base, const IMAGE_DELAYLOAD_DESCRIPTO
     DWORD id;
     ULONGLONG ord;
 
-    WINE_FIXME("(%p, %p, %p, %p, %p, 0x%08x), partial stub\n", base, desc, dllhook, syshook, addr, flags);
+    WINE_TRACE("(%p, %p, %p, %p, %p, 0x%08x), partial stub\n", base, desc, dllhook, syshook, addr, flags);
 
     phmod = get_rva(base, desc->ModuleHandleRVA);
     pIAT64 = get_rva(base, desc->ImportAddressTableRVA);
