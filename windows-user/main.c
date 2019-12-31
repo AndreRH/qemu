@@ -598,12 +598,13 @@ uint64_t qemu_execute(const void *code, uint64_t rcx)
         }
         else
         {
-            static char ret_code64[] =
+            static const char ret_code64[] =
             {
                 0x48, 0x31, 0xc9,   /* xor %rcx, %rcx */
                 0x0f, 0x05          /* syscall        */
             };
-            ret_code = ret_code64;
+            ret_code = my_alloc(sizeof(ret_code64));
+            memcpy(ret_code, ret_code64, sizeof(ret_code64));
         }
     }
 
