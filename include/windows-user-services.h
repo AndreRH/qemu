@@ -14,15 +14,6 @@ struct qemu_syscall
     };
 };
 
-static inline void qemu_syscall(struct qemu_syscall *call)
-{
-    /* TODO: 32 bit version. */
-    asm volatile( "syscall\n"
-            : /* no output */
-            : "c"(call)
-            : "memory");
-}
-
 #define QEMU_SYSCALL_ID(a) ((QEMU_CURRENT_DLL << 32ULL) | (a))
 
 static inline uint64_t guest_HANDLE_g2h(HANDLE h)
@@ -308,6 +299,16 @@ typedef const syscall_handler *(WINAPI *syscall_lib_register)(const struct qemu_
  * warning. If we ever have a diverging address space this will probably call into qemu_ops. */
 #define QEMU_G2H(a)((void *)(a))
 #define QEMU_H2G(a)((uint64_t)(a))
+
+#else
+
+static inline void qemu_syscall(struct qemu_syscall *call)
+{
+    asm volatile( "syscall\n"
+            : /* no output */
+            : "c"(call)
+            : "memory");
+}
 
 #endif
 
