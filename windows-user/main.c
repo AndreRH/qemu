@@ -1250,6 +1250,10 @@ static void hook(void *to_hook, const void *replace)
     VirtualProtect(hooked_function, sizeof(*hooked_function), old_protect, &old_protect);
 }
 
+extern int __wine_main_argc;
+extern char **__wine_main_argv;
+extern WCHAR **__wine_main_wargv;
+
 int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module, user_module;
@@ -1282,6 +1286,9 @@ int main(int argc, char **argv, char **envp)
     __wine_main_argc -= optind;
     __wine_main_argv += optind;
     __wine_main_wargv += optind;
+
+    if (GetModuleHandleA("msvcrt"))
+        WINE_ERR("msvcrt loaded too soon.\n");
 
     i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0) + 4;
     filenameW = my_alloc(i * sizeof(*filenameW));
