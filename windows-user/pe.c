@@ -98,7 +98,7 @@ static LPCSTR debugstr_us( const UNICODE_STRING *us )
 #define DEFAULT_SECURITY_COOKIE_16  (DEFAULT_SECURITY_COOKIE_32 >> 16)
 
 typedef DWORD (CALLBACK *DLLENTRYPROC)(HMODULE,DWORD,LPVOID);
-typedef void  (CALLBACK *LDRENUMPROC)(LDR_MODULE *, void *, BOOLEAN *);
+typedef void  (CALLBACK *LDRENUMPROC)(LDR_DATA_TABLE_ENTRY *, void *, BOOLEAN *);
 
 static BOOL imports_fixup_done = FALSE;  /* set once the imports have been fixed up, before attaching them */
 static BOOL process_detaching = FALSE;  /* set on process detach to avoid deadlocks with thread detach */
@@ -122,7 +122,7 @@ static const WCHAR user32W[] = {'u','s','e','r','3','2','.','d','l','l',0};
 /* internal representation of 32bit modules. per process. */
 typedef struct _wine_modref
 {
-    LDR_MODULE            ldr;
+    LDR_DATA_TABLE_ENTRY            ldr;
     int                   nDeps;
     struct _wine_modref **deps;
 } WINE_MODREF;
@@ -280,15 +280,15 @@ static inline BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module,
 static WINE_MODREF *get_modref( HMODULE hmod )
 {
     PLIST_ENTRY mark, entry;
-    PLDR_MODULE mod;
+    PLDR_DATA_TABLE_ENTRY mod;
 
-    if (cached_modref && cached_modref->ldr.BaseAddress == hmod) return cached_modref;
+    if (cached_modref && cached_modref->ldr.DllBase == hmod) return cached_modref;
 
     mark = &qemu_getTEB()->Peb->LdrData->InMemoryOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        mod = CONTAINING_RECORD(entry, LDR_MODULE, InMemoryOrderModuleList);
-        if (mod->BaseAddress == hmod)
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
+        if (mod->DllBase == hmod)
             return cached_modref = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
     }
     return NULL;
@@ -311,7 +311,7 @@ static WINE_MODREF *find_basename_module( LPCWSTR name )
     mark = &qemu_getTEB()->Peb->LdrData->InLoadOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        LDR_MODULE *mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
+        LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
         if (!strcmpiW( name, mod->BaseDllName.Buffer ))
         {
             cached_modref = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
@@ -338,7 +338,7 @@ static WINE_MODREF *find_fullname_module( LPCWSTR name )
     mark = &qemu_getTEB()->Peb->LdrData->InLoadOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        LDR_MODULE *mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
+        LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
         if (!strcmpiW( name, mod->FullDllName.Buffer ))
         {
             cached_modref = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
@@ -412,7 +412,7 @@ static FARPROC find_forwarded_export( HMODULE module, const char *forward, LPCWS
             }
             else if (process_attach( wm, NULL ) != STATUS_SUCCESS)
             {
-                qemu_LdrUnloadDll( wm->ldr.BaseAddress );
+                qemu_LdrUnloadDll( wm->ldr.DllBase );
                 wm = NULL;
             }
         }
@@ -424,14 +424,14 @@ static FARPROC find_forwarded_export( HMODULE module, const char *forward, LPCWS
             return NULL;
         }
     }
-    if ((exports = RtlImageDirectoryEntryToData( wm->ldr.BaseAddress, TRUE,
+    if ((exports = RtlImageDirectoryEntryToData( wm->ldr.DllBase, TRUE,
                                                  IMAGE_DIRECTORY_ENTRY_EXPORT, &exp_size )))
     {
         const char *name = end + 1;
         if (*name == '#')  /* ordinal */
-            proc = find_ordinal_export( wm->ldr.BaseAddress, exports, exp_size, atoi(name+1), load_path, NULL );
+            proc = find_ordinal_export( wm->ldr.DllBase, exports, exp_size, atoi(name+1), load_path, NULL );
         else
-            proc = find_named_export( wm->ldr.BaseAddress, exports, exp_size, name, -1, load_path );
+            proc = find_named_export( wm->ldr.DllBase, exports, exp_size, name, -1, load_path );
     }
 
     if (!proc)
@@ -603,7 +603,7 @@ static BOOL import_dll( HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *descr, LP
     NtProtectVirtualMemory( NtCurrentProcess(), &protect_base,
                             &protect_size, PAGE_READWRITE, &protect_old );
 
-    imp_mod = wmImp->ldr.BaseAddress;
+    imp_mod = wmImp->ldr.DllBase;
     exports = RtlImageDirectoryEntryToData( imp_mod, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &exp_size );
 
     if (!exports)
@@ -709,7 +709,7 @@ done:
 /***********************************************************************
  *           create_module_activation_context
  */
-static NTSTATUS create_module_activation_context( LDR_MODULE *module )
+static NTSTATUS create_module_activation_context( LDR_DATA_TABLE_ENTRY *module )
 {
     NTSTATUS status;
     LDR_RESOURCE_INFO info;
@@ -718,13 +718,13 @@ static NTSTATUS create_module_activation_context( LDR_MODULE *module )
     info.Type = (ULONG_PTR)RT_MANIFEST;
     info.Name = (ULONG_PTR)ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
     info.Language = 0;
-    if (!(status = LdrFindResource_U( module->BaseAddress, &info, 3, &entry )))
+    if (!(status = LdrFindResource_U( module->DllBase, &info, 3, &entry )))
     {
         ACTCTXW ctx;
         ctx.cbSize   = sizeof(ctx);
         ctx.lpSource = NULL;
         ctx.dwFlags  = ACTCTX_FLAG_RESOURCE_NAME_VALID | ACTCTX_FLAG_HMODULE_VALID;
-        ctx.hModule  = module->BaseAddress;
+        ctx.hModule  = module->DllBase;
         ctx.lpResourceName = (LPCWSTR)ISOLATIONAWARE_MANIFEST_RESOURCE_ID;
         status = RtlCreateActivationContext( &module->ActivationContext, &ctx );
     }
@@ -773,7 +773,7 @@ static BOOL is_dll_native_subsystem( HMODULE module, const IMAGE_NT_HEADERS *nt,
  * Allocate a TLS slot for a newly-loaded module.
  * The loader_section must be locked while calling this function.
  */
-static SHORT alloc_tls_slot( LDR_MODULE *mod )
+static SHORT alloc_tls_slot( LDR_DATA_TABLE_ENTRY *mod )
 {
     IMAGE_TLS_DIRECTORY64 dir_copy = {0};
     const IMAGE_TLS_DIRECTORY64 *dir;
@@ -784,7 +784,7 @@ static SHORT alloc_tls_slot( LDR_MODULE *mod )
 
     if (is_32_bit)
     {
-        if (!(dir32 = RtlImageDirectoryEntryToData( mod->BaseAddress, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &size )))
+        if (!(dir32 = RtlImageDirectoryEntryToData( mod->DllBase, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &size )))
             return -1;
         dir_copy.StartAddressOfRawData = dir32->StartAddressOfRawData;
         dir_copy.EndAddressOfRawData = dir32->EndAddressOfRawData;
@@ -796,7 +796,7 @@ static SHORT alloc_tls_slot( LDR_MODULE *mod )
     }
     else
     {
-        if (!(dir = RtlImageDirectoryEntryToData( mod->BaseAddress, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &size )))
+        if (!(dir = RtlImageDirectoryEntryToData( mod->DllBase, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &size )))
             return -1;
     }
 
@@ -810,7 +810,7 @@ static SHORT alloc_tls_slot( LDR_MODULE *mod )
             break;
     }
 
-    WINE_TRACE( "module %p data %p-%p zerofill %u index %p callback %p flags %x -> slot %u\n", mod->BaseAddress,
+    WINE_TRACE( "module %p data %p-%p zerofill %u index %p callback %p flags %x -> slot %u\n", mod->DllBase,
            (void *)dir->StartAddressOfRawData, (void *)dir->EndAddressOfRawData, dir->SizeOfZeroFill,
            (void *)dir->AddressOfIndex, (void *)dir->AddressOfCallBacks, dir->Characteristics, i );
 
@@ -896,7 +896,7 @@ static SHORT alloc_tls_slot( LDR_MODULE *mod )
  * Free the module TLS slot on unload.
  * The loader_section must be locked while calling this function.
  */
-static void free_tls_slot( LDR_MODULE *mod )
+static void free_tls_slot( LDR_DATA_TABLE_ENTRY *mod )
 {
     ULONG i = (USHORT)mod->TlsIndex;
 
@@ -926,7 +926,7 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
 
     wm->ldr.TlsIndex = alloc_tls_slot( &wm->ldr );
 
-    if (!(imports = RtlImageDirectoryEntryToData( wm->ldr.BaseAddress, TRUE,
+    if (!(imports = RtlImageDirectoryEntryToData( wm->ldr.DllBase, TRUE,
                                                   IMAGE_DIRECTORY_ENTRY_IMPORT, &size )))
         return STATUS_SUCCESS;
 
@@ -950,7 +950,7 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
     status = STATUS_SUCCESS;
     for (i = 0; i < nb_imports; i++)
     {
-        if (!import_dll( wm->ldr.BaseAddress, &imports[i], load_path, &imp ))
+        if (!import_dll( wm->ldr.DllBase, &imports[i], load_path, &imp ))
         {
             imp = NULL;
             status = STATUS_DLL_NOT_FOUND;
@@ -980,7 +980,7 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     wm->nDeps    = 0;
     wm->deps     = NULL;
 
-    wm->ldr.BaseAddress   = hModule;
+    wm->ldr.DllBase   = hModule;
     wm->ldr.EntryPoint    = NULL;
     wm->ldr.SizeOfImage   = nt->OptionalHeader.SizeOfImage;
     wm->ldr.Flags         = LDR_DONT_RESOLVE_REFS;
@@ -1005,13 +1005,13 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     }
 
     InsertTailList(&qemu_getTEB()->Peb->LdrData->InLoadOrderModuleList,
-                   &wm->ldr.InLoadOrderModuleList);
+                   &wm->ldr.InLoadOrderLinks);
     InsertTailList(&qemu_getTEB()->Peb->LdrData->InMemoryOrderModuleList,
-                   &wm->ldr.InMemoryOrderModuleList);
+                   &wm->ldr.InMemoryOrderLinks);
 
     /* wait until init is called for inserting into this list */
-    wm->ldr.InInitializationOrderModuleList.Flink = NULL;
-    wm->ldr.InInitializationOrderModuleList.Blink = NULL;
+    wm->ldr.InInitializationOrderLinks.Flink = NULL;
+    wm->ldr.InInitializationOrderLinks.Blink = NULL;
 
     /* FIXME: This code gets triggered by our DLLs, and it disables NX on the host side.
      * Both things of that are wrong. Disable it for now, but it needs to be re-enabled
@@ -1152,13 +1152,13 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved 
 {
     NTSTATUS status = STATUS_SUCCESS;
     DLLENTRYPROC entry = wm->ldr.EntryPoint;
-    void *module = wm->ldr.BaseAddress;
+    void *module = wm->ldr.DllBase;
     BOOL retv = FALSE;
 
     /* Skip calls for modules loaded with special load flags */
 
     if (wm->ldr.Flags & LDR_DONT_RESOLVE_REFS) return STATUS_SUCCESS;
-    if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.BaseAddress, reason );
+    if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.DllBase, reason );
     if (!entry || !(wm->ldr.Flags & LDR_IMAGE_IS_DLL)) return STATUS_SUCCESS;
 
     WINE_TRACE("(%p %s,%s,%p) - CALL\n", module, wine_dbgstr_w(wm->ldr.BaseDllName.Buffer),
@@ -1236,9 +1236,9 @@ static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved )
         if ((status = process_attach( wm->deps[i], lpReserved )) != STATUS_SUCCESS) break;
     }
 
-    if (!wm->ldr.InInitializationOrderModuleList.Flink)
+    if (!wm->ldr.InInitializationOrderLinks.Flink)
         InsertTailList(&qemu_getTEB()->Peb->LdrData->InInitializationOrderModuleList,
-                &wm->ldr.InInitializationOrderModuleList);
+                &wm->ldr.InInitializationOrderLinks);
 
     /* Call DLL entry point */
     if (status == STATUS_SUCCESS)
@@ -1282,7 +1282,7 @@ static void attach_implicitly_loaded_dlls( LPVOID reserved )
         mark = &qemu_getTEB()->Peb->LdrData->InLoadOrderModuleList;
         for (entry = mark->Flink; entry != mark; entry = entry->Flink)
         {
-            LDR_MODULE *mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
+            LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
 
             if (mod->Flags & (LDR_LOAD_IN_PROGRESS | LDR_PROCESS_ATTACHED)) continue;
             WINE_TRACE( "found implicitly loaded %s, attaching to it\n",
@@ -1304,15 +1304,15 @@ static void attach_implicitly_loaded_dlls( LPVOID reserved )
 static void process_detach(void)
 {
     PLIST_ENTRY mark, entry;
-    PLDR_MODULE mod;
+    PLDR_DATA_TABLE_ENTRY mod;
 
     mark = &qemu_getTEB()->Peb->LdrData->InInitializationOrderModuleList;
     do
     {
         for (entry = mark->Blink; entry != mark; entry = entry->Blink)
         {
-            mod = CONTAINING_RECORD(entry, LDR_MODULE, 
-                                    InInitializationOrderModuleList);
+            mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, 
+                                    InInitializationOrderLinks);
             /* Check whether to detach this DLL */
             if ( !(mod->Flags & LDR_PROCESS_ATTACHED) )
                 continue;
@@ -1341,7 +1341,7 @@ static void process_detach(void)
 NTSTATUS MODULE_DllThreadAttach( LPVOID lpReserved )
 {
     PLIST_ENTRY mark, entry;
-    PLDR_MODULE mod;
+    PLDR_DATA_TABLE_ENTRY mod;
     NTSTATUS    status;
 
     /* don't do any attach calls if process is exiting */
@@ -1355,8 +1355,8 @@ NTSTATUS MODULE_DllThreadAttach( LPVOID lpReserved )
     mark = &qemu_getTEB()->Peb->LdrData->InInitializationOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        mod = CONTAINING_RECORD(entry, LDR_MODULE, 
-                                InInitializationOrderModuleList);
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, 
+                                InInitializationOrderLinks);
         if ( !(mod->Flags & LDR_PROCESS_ATTACHED) )
             continue;
         if ( mod->Flags & LDR_NO_DLL_CALLS )
@@ -1394,17 +1394,17 @@ static NTSTATUS qemu_LdrDisableThreadCalloutsForDll(HMODULE hModule)
  *
  * The loader_section must be locked while calling this function
  */
-static NTSTATUS qemu_LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
+static NTSTATUS qemu_LdrFindEntryForAddress(const void* addr, PLDR_DATA_TABLE_ENTRY* pmod)
 {
     PLIST_ENTRY mark, entry;
-    PLDR_MODULE mod;
+    PLDR_DATA_TABLE_ENTRY mod;
 
     mark = &qemu_getTEB()->Peb->LdrData->InMemoryOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        mod = CONTAINING_RECORD(entry, LDR_MODULE, InMemoryOrderModuleList);
-        if (mod->BaseAddress <= addr &&
-            (const char *)addr < (char*)mod->BaseAddress + mod->SizeOfImage)
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
+        if (mod->DllBase <= addr &&
+            (const char *)addr < (char*)mod->DllBase + mod->SizeOfImage)
         {
             *pmod = mod;
             return STATUS_SUCCESS;
@@ -1415,19 +1415,19 @@ static NTSTATUS qemu_LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
 
 /* Give Wine's loader information about our loaded modules. This is needed for creating
  * activation contexts from loaded guest modules. */
-NTSTATUS WINAPI hook_LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
+NTSTATUS WINAPI hook_LdrFindEntryForAddress(const void* addr, PLDR_DATA_TABLE_ENTRY* pmod)
 {
     PLIST_ENTRY mark, entry;
-    PLDR_MODULE mod;
+    PLDR_DATA_TABLE_ENTRY mod;
     NTSTATUS ret;
 
     WINE_TRACE("Looking for address %p.\n", addr);
     mark = &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        mod = CONTAINING_RECORD(entry, LDR_MODULE, InMemoryOrderModuleList);
-        if (mod->BaseAddress <= addr &&
-            (const char *)addr < (char*)mod->BaseAddress + mod->SizeOfImage)
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
+        if (mod->DllBase <= addr &&
+            (const char *)addr < (char*)mod->DllBase + mod->SizeOfImage)
         {
             WINE_TRACE("Found address %p in Wine's PEB.\n", addr);
             *pmod = mod;
@@ -1449,7 +1449,7 @@ NTSTATUS WINAPI hook_LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
 NTSTATUS WINAPI qemu_LdrEnumerateLoadedModules( void *unknown, void *cb, void *context )
 {
     LIST_ENTRY *mark, *entry;
-    LDR_MODULE *mod;
+    LDR_DATA_TABLE_ENTRY *mod;
     BOOLEAN stop = FALSE;
     LDRENUMPROC callback = cb;
 
@@ -1463,7 +1463,7 @@ NTSTATUS WINAPI qemu_LdrEnumerateLoadedModules( void *unknown, void *cb, void *c
     mark = &qemu_getTEB()->Peb->LdrData->InMemoryOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
-        mod = CONTAINING_RECORD( entry, LDR_MODULE, InMemoryOrderModuleList );
+        mod = CONTAINING_RECORD( entry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks );
         callback( mod, context, &stop );
         if (stop) break;
     }
@@ -2006,8 +2006,8 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
         if ((status = fixup_imports( wm, load_path )) != STATUS_SUCCESS)
         {
             /* the module has only be inserted in the load & memory order lists */
-            RemoveEntryList(&wm->ldr.InLoadOrderModuleList);
-            RemoveEntryList(&wm->ldr.InMemoryOrderModuleList);
+            RemoveEntryList(&wm->ldr.InLoadOrderLinks);
+            RemoveEntryList(&wm->ldr.InMemoryOrderLinks);
 
             /* WINE_FIXME: there are several more dangling references
              * left. Including dlls loaded by this dll before the
@@ -2403,7 +2403,7 @@ static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_
 
         WINE_TRACE("Found %s for %s at %p, count=%d\n",
               wine_dbgstr_w((*pwm)->ldr.FullDllName.Buffer), wine_dbgstr_w(libname),
-              (*pwm)->ldr.BaseAddress, (*pwm)->ldr.LoadCount);
+              (*pwm)->ldr.DllBase, (*pwm)->ldr.LoadCount);
         if (filename != buffer) RtlFreeHeap( GetProcessHeap(), 0, filename );
         return STATUS_SUCCESS;
     }
@@ -2445,7 +2445,7 @@ static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_
         /* Initialize DLL just loaded */
         WINE_TRACE("Loaded module %s (%s) at %p\n", wine_dbgstr_w(filename),
               ((*pwm)->ldr.Flags & LDR_WINE_INTERNAL) ? "builtin" : "native",
-              (*pwm)->ldr.BaseAddress);
+              (*pwm)->ldr.DllBase);
         if (handle) NtClose( handle );
         if (filename != buffer) RtlFreeHeap( GetProcessHeap(), 0, filename );
         return nts;
@@ -2473,11 +2473,11 @@ static NTSTATUS qemu_LdrLoadDll(LPCWSTR path_name, DWORD flags,
         nts = process_attach( wm, NULL );
         if (nts != STATUS_SUCCESS)
         {
-            qemu_LdrUnloadDll(wm->ldr.BaseAddress);
+            qemu_LdrUnloadDll(wm->ldr.DllBase);
             wm = NULL;
         }
     }
-    *hModule = (wm) ? wm->ldr.BaseAddress : NULL;
+    *hModule = (wm) ? wm->ldr.DllBase : NULL;
 
     RtlLeaveCriticalSection( &loader_section );
     return nts;
@@ -2516,7 +2516,7 @@ static NTSTATUS qemu_LdrGetDllHandle( LPCWSTR load_path, ULONG flags, const UNIC
 
     if (status == STATUS_SUCCESS)
     {
-        if (wm) *base = wm->ldr.BaseAddress;
+        if (wm) *base = wm->ldr.DllBase;
         else status = STATUS_DLL_NOT_FOUND;
     }
 
@@ -2770,7 +2770,7 @@ void WINAPI RtlExitUserProcess( DWORD status )
 void WINAPI LdrShutdownThread(void)
 {
     PLIST_ENTRY mark, entry;
-    PLDR_MODULE mod;
+    PLDR_DATA_TABLE_ENTRY mod;
     UINT i;
     void **pointers;
 
@@ -2784,8 +2784,8 @@ void WINAPI LdrShutdownThread(void)
     mark = &qemu_getTEB()->Peb->LdrData->InInitializationOrderModuleList;
     for (entry = mark->Blink; entry != mark; entry = entry->Blink)
     {
-        mod = CONTAINING_RECORD(entry, LDR_MODULE, 
-                                InInitializationOrderModuleList);
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, 
+                                InInitializationOrderLinks);
         if ( !(mod->Flags & LDR_PROCESS_ATTACHED) )
             continue;
         if ( mod->Flags & LDR_NO_DLL_CALLS )
@@ -2817,10 +2817,10 @@ void WINAPI LdrShutdownThread(void)
  */
 static void free_modref( WINE_MODREF *wm )
 {
-    RemoveEntryList(&wm->ldr.InLoadOrderModuleList);
-    RemoveEntryList(&wm->ldr.InMemoryOrderModuleList);
-    if (wm->ldr.InInitializationOrderModuleList.Flink)
-        RemoveEntryList(&wm->ldr.InInitializationOrderModuleList);
+    RemoveEntryList(&wm->ldr.InLoadOrderLinks);
+    RemoveEntryList(&wm->ldr.InMemoryOrderLinks);
+    if (wm->ldr.InInitializationOrderLinks.Flink)
+        RemoveEntryList(&wm->ldr.InInitializationOrderLinks);
 
     WINE_TRACE(" unloading %s\n", wine_dbgstr_w(wm->ldr.FullDllName.Buffer));
     WINE_TRACE("Unloaded module %s : %s\n",
@@ -2828,14 +2828,14 @@ static void free_modref( WINE_MODREF *wm )
                     (wm->ldr.Flags & LDR_WINE_INTERNAL) ? "builtin" : "native" );
 
     mmap_lock();
-    tb_invalidate_phys_range((ULONG_PTR)wm->ldr.BaseAddress,
-            (ULONG_PTR)wm->ldr.BaseAddress + (ULONG_PTR)wm->ldr.SizeOfImage);
+    tb_invalidate_phys_range((ULONG_PTR)wm->ldr.DllBase,
+            (ULONG_PTR)wm->ldr.DllBase + (ULONG_PTR)wm->ldr.SizeOfImage);
     mmap_unlock();
 
     free_tls_slot( &wm->ldr );
     RtlReleaseActivationContext( wm->ldr.ActivationContext );
     //if (wm->ldr.Flags & LDR_WINE_INTERNAL) wine_dll_unload( wm->ldr.SectionHandle );
-    VirtualFree(wm->ldr.BaseAddress, 0, MEM_RELEASE);
+    VirtualFree(wm->ldr.DllBase, 0, MEM_RELEASE);
     if (cached_modref == wm) cached_modref = NULL;
     RtlFreeUnicodeString( &wm->ldr.FullDllName );
     RtlFreeHeap( GetProcessHeap(), 0, wm->deps );
@@ -2853,13 +2853,13 @@ static void free_modref( WINE_MODREF *wm )
 static void MODULE_FlushModrefs(void)
 {
     PLIST_ENTRY mark, entry, prev;
-    PLDR_MODULE mod;
+    PLDR_DATA_TABLE_ENTRY mod;
     WINE_MODREF*wm;
 
     mark = &qemu_getTEB()->Peb->LdrData->InInitializationOrderModuleList;
     for (entry = mark->Blink; entry != mark; entry = prev)
     {
-        mod = CONTAINING_RECORD(entry, LDR_MODULE, InInitializationOrderModuleList);
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InInitializationOrderLinks);
         wm = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
         prev = entry->Blink;
         if (!mod->LoadCount) free_modref( wm );
@@ -2869,7 +2869,7 @@ static void MODULE_FlushModrefs(void)
     mark = &qemu_getTEB()->Peb->LdrData->InLoadOrderModuleList;
     for (entry = mark->Blink; entry != mark; entry = prev)
     {
-        mod = CONTAINING_RECORD(entry, LDR_MODULE, InLoadOrderModuleList);
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
         wm = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
         prev = entry->Blink;
         if (!mod->LoadCount) free_modref( wm );
@@ -3150,10 +3150,10 @@ NTSTATUS qemu_LdrInitializeThunk(void)
                                        REG_DWORD, &peb->NtGlobalFlag, sizeof(peb->NtGlobalFlag), NULL );
 
     /* the main exe needs to be the first in the load order list */
-    RemoveEntryList( &wm->ldr.InLoadOrderModuleList );
-    InsertHeadList( &peb->LdrData->InLoadOrderModuleList, &wm->ldr.InLoadOrderModuleList );
-    RemoveEntryList( &wm->ldr.InMemoryOrderModuleList );
-    InsertHeadList( &peb->LdrData->InMemoryOrderModuleList, &wm->ldr.InMemoryOrderModuleList );
+    RemoveEntryList( &wm->ldr.InLoadOrderLinks );
+    InsertHeadList( &peb->LdrData->InLoadOrderModuleList, &wm->ldr.InLoadOrderLinks );
+    RemoveEntryList( &wm->ldr.InMemoryOrderLinks );
+    InsertHeadList( &peb->LdrData->InMemoryOrderModuleList, &wm->ldr.InMemoryOrderLinks );
 
     /* TODO: Integrate stack allocation similarly to the way Wine handles this. */
 
@@ -3215,11 +3215,11 @@ BOOL qemu_FreeLibrary(HMODULE module)
 
 void *qemu_RtlPcToFileHeader(void *pc, void **address)
 {
-    LDR_MODULE *module;
+    LDR_DATA_TABLE_ENTRY *module;
     PVOID ret = NULL;
 
     RtlEnterCriticalSection( &loader_section );
-    if (!qemu_LdrFindEntryForAddress( pc, &module )) ret = module->BaseAddress;
+    if (!qemu_LdrFindEntryForAddress( pc, &module )) ret = module->DllBase;
     RtlLeaveCriticalSection( &loader_section );
     *address = ret;
     return ret;
@@ -3274,7 +3274,7 @@ DWORD qemu_GetModuleFileName(HMODULE hModule, LPWSTR lpFileName, DWORD size)
 {
     ULONG len = 0;
     ULONG_PTR magic;
-    LDR_MODULE *pldr;
+    LDR_DATA_TABLE_ENTRY *pldr;
     NTSTATUS nts;
 
     qemu_LdrLockLoaderLock( 0, NULL, &magic );
@@ -3446,11 +3446,11 @@ done:
 
 BOOL qemu_FindEntryForAddress(void *addr, HMODULE *mod)
 {
-    LDR_MODULE *ldr_mod;
+    LDR_DATA_TABLE_ENTRY *ldr_mod;
     NTSTATUS status = qemu_LdrFindEntryForAddress(addr, &ldr_mod);
     if (status != STATUS_SUCCESS)
         return FALSE;
-    *mod = ldr_mod->BaseAddress;
+    *mod = ldr_mod->DllBase;
     return TRUE;
 }
 
