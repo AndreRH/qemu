@@ -1056,7 +1056,7 @@ static void growstack(void)
 
 static void block_address_space(void)
 {
-    void *map;
+    volatile void * volatile map; /* clang does not understand the concept of deliberately running out of memory. */
     unsigned long size = 1UL << 63UL;
     void (* WINAPI p__wine_RtlSetFirewallHeap)(BOOL firewall);
     HMODULE ntdll = GetModuleHandleA("ntdll");
@@ -1088,7 +1088,9 @@ static void block_address_space(void)
      * allocate from. On my system this gives me about 140kb of memory.
      *
      * Trying to malloc without virtual memory available hangs on OSX. We can happily skip it there
-     * because the default malloc zone is placed below 4GB anyway. */
+     * because the default malloc zone is placed below 4GB anyway.
+     *
+     * FIXME: Re-test if this is because clang optimized the malloc call away like it does on Linux. */
 #ifndef __APPLE__
     size = 1UL << 63UL;
     while(size)
