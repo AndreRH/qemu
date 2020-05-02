@@ -1265,7 +1265,7 @@ int main(int argc, char **argv, char **envp)
     DWORD_PTR image_base, image_size;
     void *reserved;
     int ret;
-    LDR_MODULE *self_module;
+    LDR_DATA_TABLE_ENTRY *self_module;
     ULONG_PTR magic;
     NTSTATUS nts;
 
