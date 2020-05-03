@@ -284,6 +284,7 @@ struct qemu_ops
             void *dllhook, void *syshook, IMAGE_THUNK_DATA* addr, ULONG flags);
     BOOL (*qemu_get_ldr_module)(HANDLE process, HMODULE mod, void **ldr);
     void *(*qemu_RtlPcToFileHeader)(void *pc, void **address);
+    NTSTATUS (*qemu_LdrGetDllHandle)(LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base);
     BOOL (*qemu_DllMain)(DWORD reason, void *reserved);
     NTSTATUS (*qemu_set_context)(HANDLE thread, void *ctx);
     HMODULE (*qemu_module_g2h)(uint64_t guest);

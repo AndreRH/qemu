@@ -75,6 +75,7 @@ static const struct qemu_ops ops =
     qemu_LdrResolveDelayLoadedAPI,
     qemu_get_ldr_module,
     qemu_RtlPcToFileHeader,
+    qemu_LdrGetDllHandle,
     qemu_DllMain,
     qemu_set_context,
     qemu_ldr_module_g2h,
