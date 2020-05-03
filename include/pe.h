@@ -11,7 +11,7 @@ NTSTATUS qemu_LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
 BOOL qemu_FreeLibrary(HMODULE module);
 BOOL qemu_FindEntryForAddress(void *addr, HMODULE *mod);
 NTSTATUS WINAPI hook_LdrFindEntryForAddress(const void* addr, PLDR_DATA_TABLE_ENTRY* pmod);
-BOOL qemu_DisableThreadLibraryCalls(HMODULE mod);
+NTSTATUS qemu_LdrDisableThreadCalloutsForDll(HMODULE hModule);
 BOOL qemu_get_ldr_module(HANDLE process, HMODULE mod, void **ldr);
 void *qemu_RtlPcToFileHeader(void *pc, void **address);
 NTSTATUS qemu_LdrGetDllHandle( LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base );
