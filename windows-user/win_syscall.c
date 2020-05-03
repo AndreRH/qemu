@@ -64,7 +64,7 @@ static const struct qemu_ops ops =
     qemu_FreeLibrary,
     qemu_GetModuleFileName,
     qemu_GetModuleHandleEx,
-    qemu_GetProcAddress,
+    qemu_LdrGetProcedureAddress,
     (void *)qemu_getTEB, /* Cast for (TEB *) -> (void *) */
     qemu_getTEB32, /* Cast for (TEB32 *) -> (void *) */
     qemu_LdrLoadDll,
