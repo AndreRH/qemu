@@ -2487,7 +2487,7 @@ static NTSTATUS qemu_LdrLoadDll(LPCWSTR path_name, DWORD flags,
 /******************************************************************
  *		LdrGetDllHandle (NTDLL.@)
  */
-static NTSTATUS qemu_LdrGetDllHandle( LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base )
+NTSTATUS qemu_LdrGetDllHandle( LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base )
 {
     NTSTATUS status;
     WCHAR buffer[128];
