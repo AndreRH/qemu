@@ -20,6 +20,8 @@ HMODULE qemu_ldr_module_g2h(uint64_t guest);
 uint64_t qemu_ldr_module_h2g(HMODULE host);
 void* qemu_LdrResolveDelayLoadedAPI( void* base, const IMAGE_DELAYLOAD_DESCRIPTOR* desc,
         void *dllhook, void *syshook, IMAGE_THUNK_DATA *addr, ULONG flags );
+NTSTATUS qemu_LdrLoadDll(LPCWSTR path_name, DWORD flags,
+        const UNICODE_STRING *libname, HMODULE* hModule);
 
 TEB *qemu_getTEB(void);
 TEB32 *qemu_getTEB32(void);

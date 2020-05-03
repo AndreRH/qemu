@@ -2457,7 +2457,7 @@ static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_
     return nts;
 }
 
-static NTSTATUS qemu_LdrLoadDll(LPCWSTR path_name, DWORD flags,
+NTSTATUS qemu_LdrLoadDll(LPCWSTR path_name, DWORD flags,
         const UNICODE_STRING *libname, HMODULE* hModule)
 {
     WINE_MODREF *wm;
