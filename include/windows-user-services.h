@@ -272,7 +272,7 @@ struct qemu_ops
     BOOL (*qemu_FreeLibrary)(HMODULE module);
     DWORD (*qemu_GetModuleFileName)(HMODULE module, WCHAR *filename, DWORD size);
     HMODULE (*qemu_GetModuleHandleEx)(DWORD flags, const WCHAR *name);
-    const void *(*qemu_GetProcAddress)(HMODULE module, const char *name);
+    NTSTATUS (*qemu_LdrGetProcedureAddress)(HMODULE module, const ANSI_STRING *name, ULONG ord, PVOID *address);
     void *(*qemu_getTEB)(void);
     TEB32 *(*qemu_getTEB32)(void);
     NTSTATUS (*qemu_LdrLoadDll)(LPCWSTR path_name, DWORD flags, const UNICODE_STRING *libname, HMODULE* hModule);

@@ -6,7 +6,8 @@
 HMODULE qemu_LoadLibrary(const WCHAR *name, DWORD flags);
 DWORD qemu_GetModuleFileName(HMODULE module, WCHAR *filename, DWORD size);
 HMODULE qemu_GetModuleHandleEx(DWORD flags, const WCHAR *name);
-const void *qemu_GetProcAddress(HMODULE module, const char *name);
+NTSTATUS qemu_LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
+        ULONG ord, PVOID *address);
 BOOL qemu_FreeLibrary(HMODULE module);
 BOOL qemu_FindEntryForAddress(void *addr, HMODULE *mod);
 NTSTATUS WINAPI hook_LdrFindEntryForAddress(const void* addr, PLDR_DATA_TABLE_ENTRY* pmod);

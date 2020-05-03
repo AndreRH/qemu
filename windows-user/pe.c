@@ -1515,8 +1515,8 @@ static NTSTATUS qemu_LdrUnlockLoaderLock( ULONG flags, ULONG_PTR magic )
 /******************************************************************
  *		qemu_LdrGetProcedureAddress  (NTDLL.@)
  */
-static NTSTATUS WINAPI qemu_LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
-                                       ULONG ord, PVOID *address)
+NTSTATUS qemu_LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
+        ULONG ord, PVOID *address)
 {
     IMAGE_EXPORT_DIRECTORY *exports;
     DWORD exp_size;
@@ -3299,30 +3299,6 @@ DWORD qemu_GetModuleFileName(HMODULE hModule, LPWSTR lpFileName, DWORD size)
 
     WINE_TRACE( "%s\n", wine_dbgstr_wn(lpFileName, len) );
     return len;
-}
-
-const void *qemu_GetProcAddress(HMODULE module, const char *function)
-{
-    NTSTATUS    nts;
-    FARPROC     fp;
-
-    if (!module) module = qemu_getTEB()->Peb->ImageBaseAddress;
-
-    if ((ULONG_PTR)function >> 16)
-    {
-        ANSI_STRING     str;
-
-        RtlInitAnsiString( &str, function );
-        nts = qemu_LdrGetProcedureAddress( module, &str, 0, (void**)&fp );
-    }
-    else
-        nts = qemu_LdrGetProcedureAddress( module, NULL, LOWORD(function), (void**)&fp );
-    if (nts != STATUS_SUCCESS)
-    {
-        SetLastError( RtlNtStatusToDosError( nts ) );
-        fp = NULL;
-    }
-    return fp;
 }
 
 static BOOL load_library_as_datafile( LPCWSTR name, HMODULE* hmod)
