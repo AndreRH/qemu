@@ -275,7 +275,7 @@ struct qemu_ops
     const void *(*qemu_GetProcAddress)(HMODULE module, const char *name);
     void *(*qemu_getTEB)(void);
     TEB32 *(*qemu_getTEB32)(void);
-    HMODULE (*qemu_LoadLibrary)(const WCHAR *name, DWORD flags);
+    NTSTATUS (*qemu_LdrLoadDll)(LPCWSTR path_name, DWORD flags, const UNICODE_STRING *libname, HMODULE* hModule);
     void (*qemu_set_except_handler)(uint64_t handler);
     void (*qemu_set_call_entry)(uint64_t call_entry);
     BOOL (*qemu_FindEntryForAddress)(void *addr, HMODULE *mod);
