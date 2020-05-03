@@ -1416,6 +1416,8 @@ int main(int argc, char **argv, char **envp)
     }
     qemu_get_image_info(exe_module, &image);
     guest_PEB.ImageBaseAddress = exe_module;
+    if (guest_PEB32)
+        guest_PEB32->ImageBaseAddress = QEMU_H2G(exe_module);
 
     if (image.stack_reserve != DEFAULT_STACK_SIZE)
     {
