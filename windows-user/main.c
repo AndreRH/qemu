@@ -49,6 +49,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qemu);
 
+extern LPWSTR __cdecl wcsstr( LPCWSTR str, LPCWSTR sub );
+
 char *exec_path;
 
 int singlestep;
@@ -980,7 +982,7 @@ static void init_process_params(char **argv, const char *filenme)
      * that WindowTitle has the .so ending removed. This could be used for a more reliable check.
      *
      * Is there a way to catch a case where the title is deliberately set to "qemu-x86_64.exe"? */
-    if (strstrW(NtCurrentTeb()->Peb->ProcessParameters->WindowTitle.Buffer, qemu_x86_64exeW))
+    if (wcsstr(NtCurrentTeb()->Peb->ProcessParameters->WindowTitle.Buffer, qemu_x86_64exeW))
     {
         RtlCreateUnicodeStringFromAsciiz(&guest_PEB.ProcessParameters->WindowTitle, filename);
     }
