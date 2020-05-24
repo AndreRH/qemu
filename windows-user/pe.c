@@ -885,12 +885,12 @@ static SHORT alloc_tls_slot( LDR_DATA_TABLE_ENTRY *mod )
         if (teb32)
         {
             RtlFreeHeap( GetProcessHeap(), 0,
-                    (void *)(ULONG_PTR)interlocked_xchg(((int *)(ULONG_PTR)teb32->ThreadLocalStoragePointer) + i, (ULONG_PTR)new_ptr ));
+                    (void *)(ULONG_PTR)InterlockedExchange(((int *)(ULONG_PTR)teb32->ThreadLocalStoragePointer) + i, (ULONG_PTR)new_ptr ));
         }
         else
         {
             RtlFreeHeap( GetProcessHeap(), 0,
-                    interlocked_xchg_ptr( (void **)teb->ThreadLocalStoragePointer + i, new_ptr ));
+                    InterlockedExchangePointer( (void **)teb->ThreadLocalStoragePointer + i, new_ptr ));
         }
     }
 
