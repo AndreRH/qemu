@@ -44,7 +44,6 @@
 #include "qemu/help_option.h"
 #include "cpu.h"
 #include "exec/exec-all.h"
-#include "tcg.h"
 #include "qemu/timer.h"
 #include "qemu/envlist.h"
 #include "exec/log.h"
