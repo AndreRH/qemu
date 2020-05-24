@@ -36,7 +36,7 @@
 #include "qemu/help_option.h"
 #include "cpu.h"
 #include "exec/exec-all.h"
-#include "tcg.h"
+#include "tcg/tcg.h"
 #include "qemu/timer.h"
 #include "qemu/envlist.h"
 #include "exec/log.h"
@@ -56,7 +56,7 @@ char *exec_path;
 int singlestep;
 static const char *filename;
 unsigned long guest_base;
-int have_guest_base;
+bool have_guest_base;
 unsigned long reserved_va;
 static struct qemu_pe_image image;
 BOOL is_32_bit;
