@@ -1257,10 +1257,6 @@ static void hook(void *to_hook, const void *replace)
     VirtualProtect(hooked_function, sizeof(*hooked_function), old_protect, &old_protect);
 }
 
-extern int __wine_main_argc;
-extern char **__wine_main_argv;
-extern WCHAR **__wine_main_wargv;
-
 int main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module, user_module;
@@ -1294,9 +1290,6 @@ int main(int argc, char **argv, char **envp)
      * app, but msvcrt's getmainargs() has an option to expand wildcards, which makes
      * everything unpredictable. */
     WINE_TRACE("Fixing up command line\n");
-    __wine_main_argc -= optind;
-    __wine_main_argv += optind;
-    __wine_main_wargv += optind;
     NtCurrentTeb()->Peb->ProcessParameters->CommandLine.Buffer = NULL;
     build_command_line(argv + optind, NtCurrentTeb()->Peb->ProcessParameters);
     RtlUnicodeStringToAnsiString( &ansi, &NtCurrentTeb()->Peb->ProcessParameters->CommandLine, TRUE );
