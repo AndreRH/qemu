@@ -849,12 +849,11 @@ static int parse_args(int argc, char **argv)
     return optind;
 }
 
-static BOOL build_command_line(char **argv)
+static BOOL build_command_line(char **argv, RTL_USER_PROCESS_PARAMETERS* rupp)
 {
     int len;
     char **arg;
     LPWSTR p;
-    RTL_USER_PROCESS_PARAMETERS* rupp = &process_params;
 
     if (rupp->CommandLine.Buffer) return TRUE; /* already got it from the server */
 
@@ -977,7 +976,7 @@ static void init_process_params(char **argv, const char *filenme)
     static const WCHAR qemu_x86_64exeW[] = {'q','e','m','u','-','x','8','6','_','6','4','.','e','x','e', 0};
 
     /* FIXME: Wine allocates the string buffer right behind the process parameter structure. */
-    build_command_line(argv);
+    build_command_line(argv, &process_params);
     guest_PEB.ProcessParameters = &process_params;
     guest_PEB.LdrData = &guest_ldr;
     guest_PEB.ProcessHeap = GetProcessHeap();
@@ -1274,6 +1273,9 @@ int main(int argc, char **argv, char **envp)
     LDR_DATA_TABLE_ENTRY *self_module;
     ULONG_PTR magic;
     NTSTATUS nts;
+    ANSI_STRING ansi;
+    static const char *crts[] = {"msvcr100", "msvcr110", "msvcr120", "msvcr120_app", "msvcr70", "msvcr71",
+            "msvcr80", "msvcr90", "msvcrt", "msvcrt20", "msvcrt40", "msvcrtd", "ucrtbase"};
 
     /* FIXME: The order of operations is a mess, especially setting up the TEB and loading the
      * guest binary. */
@@ -1291,12 +1293,22 @@ int main(int argc, char **argv, char **envp)
      * It would be a bit more reliable if we added the offset before returning it to the
      * app, but msvcrt's getmainargs() has an option to expand wildcards, which makes
      * everything unpredictable. */
+    WINE_TRACE("Fixing up command line\n");
     __wine_main_argc -= optind;
     __wine_main_argv += optind;
     __wine_main_wargv += optind;
+    NtCurrentTeb()->Peb->ProcessParameters->CommandLine.Buffer = NULL;
+    build_command_line(argv + optind, NtCurrentTeb()->Peb->ProcessParameters);
+    RtlUnicodeStringToAnsiString( &ansi, &NtCurrentTeb()->Peb->ProcessParameters->CommandLine, TRUE );
+    strcpy(GetCommandLineA(), ansi.Buffer);
+    RtlFreeAnsiString(&ansi);
+    WINE_TRACE("Done fixing up cmdline\n");
 
-    if (GetModuleHandleA("msvcrt"))
-        WINE_ERR("msvcrt loaded too soon.\n");
+    for (i = 0; i < ARRAY_SIZE(crts); ++i)
+    {
+        if (GetModuleHandleA(crts[i]))
+            WINE_ERR("%s loaded too soon.\n", crts[i]);
+    }
 
     i = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0) + 4;
     filenameW = my_alloc(i * sizeof(*filenameW));
@@ -1311,19 +1323,6 @@ int main(int argc, char **argv, char **envp)
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
-
-    user_module = LoadLibraryA("user32.dll");
-    if (!user_module)
-    {
-        fprintf(stderr, "Cannot load user32.dll\n");
-        ExitProcess(1);
-    }
-    p_CharNextA = (void *)GetProcAddress(user_module, "CharNextA");
-    if (!p_CharNextA)
-    {
-        fprintf(stderr, "CharNextA not found in user32.dll\n");
-        ExitProcess(1);
-    }
 
     tcg_exec_init(0);
     tcg_prologue_init(tcg_ctx);
@@ -1358,6 +1357,19 @@ int main(int argc, char **argv, char **envp)
     self_module->FullDllName.Buffer = exename;
     self_module->FullDllName.Length = strlenW(exename) * sizeof(*exename);
     LdrUnlockLoaderLock( 0, magic );
+
+    user_module = LoadLibraryA("user32.dll");
+    if (!user_module)
+    {
+        fprintf(stderr, "Cannot load user32.dll\n");
+        ExitProcess(1);
+    }
+    p_CharNextA = (void *)GetProcAddress(user_module, "CharNextA");
+    if (!p_CharNextA)
+    {
+        fprintf(stderr, "CharNextA not found in user32.dll\n");
+        ExitProcess(1);
+    }
 
     if (!load_host_dlls())
     {
