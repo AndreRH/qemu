@@ -171,7 +171,7 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
      * There is no way the target can handle this other than raising
      * an exception.  Undo signal and retaddr state prior to longjmp.
      */
-    sigprocmask(SIG_SETMASK, old_set, NULL);
+//     sigprocmask(SIG_SETMASK, old_set, NULL);
     clear_helper_retaddr();
 
     cc = CPU_GET_CLASS(cpu);
@@ -589,7 +589,7 @@ int cpu_signal_handler(int host_signum, void *pinfo, void *puc)
 {
     siginfo_t *info = pinfo;
     ucontext_t *uc = puc;
-    uintptr_t pc = uc->uc_mcontext.pc;
+    uintptr_t pc = (uintptr_t)info->si_addr;
     bool is_write;
     struct _aarch64_ctx *hdr;
     struct esr_context const *esrctx = NULL;
