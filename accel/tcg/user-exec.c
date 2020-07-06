@@ -595,12 +595,14 @@ int cpu_signal_handler(int host_signum, void *pinfo, void *puc)
     struct esr_context const *esrctx = NULL;
 
     /* Find the esr_context, which has the WnR bit in it */
+#if 0
     for (hdr = first_ctx(uc); hdr->magic; hdr = next_ctx(hdr)) {
         if (hdr->magic == ESR_MAGIC) {
             esrctx = (struct esr_context const *)hdr;
             break;
         }
     }
+#endif
 
     if (esrctx) {
         /* For data aborts ESR.EC is 0b10010x: then bit 6 is the WnR bit */
