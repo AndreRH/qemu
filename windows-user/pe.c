@@ -1856,6 +1856,13 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
             goto error;
         }
 
+        if (alloc != location)
+        {
+            /* this is likely to happen when page size is not 4K */
+            WINE_ERR("VirtualAlloc returned %p which differs from %p, expect trouble.\n", alloc, location);
+            alloc = location;
+        }
+
         if (section[i].SizeOfRawData)
         {
             WINE_TRACE("Reading %8s from 0x%x to %p.\n",
