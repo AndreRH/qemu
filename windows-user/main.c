@@ -49,7 +49,10 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qemu);
 
-extern LPWSTR __cdecl wcsstr( LPCWSTR str, LPCWSTR sub );
+int (* __cdecl ntdll__wcsicmp)( LPCWSTR str1, LPCWSTR str2 );
+int (* __cdecl ntdll__wcsnicmp)( LPCWSTR str1, LPCWSTR str2, size_t n );
+LPWSTR (* __cdecl ntdll_wcsstr)( LPCWSTR str, LPCWSTR sub );
+ULONG (* __cdecl ntdll_wcstoul)(LPCWSTR s, LPWSTR *end, INT base);
 
 char *exec_path;
 
@@ -985,7 +988,7 @@ static void init_process_params(char **argv, const char *filenme)
      * that WindowTitle has the .so ending removed. This could be used for a more reliable check.
      *
      * Is there a way to catch a case where the title is deliberately set to "qemu-x86_64.exe"? */
-    if (wcsstr(NtCurrentTeb()->Peb->ProcessParameters->WindowTitle.Buffer, qemu_x86_64exeW))
+    if (ntdll_wcsstr(NtCurrentTeb()->Peb->ProcessParameters->WindowTitle.Buffer, qemu_x86_64exeW))
     {
         RtlCreateUnicodeStringFromAsciiz(&guest_PEB.ProcessParameters->WindowTitle, filename);
     }
@@ -1288,6 +1291,7 @@ int main(int argc, char **argv, char **envp)
     ULONG_PTR magic;
     NTSTATUS nts;
     ANSI_STRING ansi;
+    HANDLE ntdll_handle;
     static const char *crts[] = {"msvcr100", "msvcr110", "msvcr120", "msvcr120_app", "msvcr70", "msvcr71",
             "msvcr80", "msvcr90", "msvcrt", "msvcrt20", "msvcrt40", "msvcrtd", "ucrtbase"};
 
@@ -1295,6 +1299,14 @@ int main(int argc, char **argv, char **envp)
      * guest binary. */
 
     fill_4g_holes();
+
+    ntdll_handle = GetModuleHandleA("ntdll");
+    ntdll__wcsicmp = (void *)GetProcAddress(ntdll_handle, "_wcsicmp");
+    ntdll__wcsnicmp = (void *)GetProcAddress(ntdll_handle, "_wcsnicmp");
+    ntdll_wcsstr = (void *)GetProcAddress(ntdll_handle, "wcsstr");
+    ntdll_wcstoul = (void *)GetProcAddress(ntdll_handle, "wcstoul");
+    if (!ntdll__wcsicmp || !ntdll__wcsnicmp || !ntdll_wcsstr || !ntdll_wcstoul)
+        WINE_ERR("Required function not found in ntdll.\n");
 
     parallel_cpus = true;
 
@@ -1433,7 +1445,7 @@ int main(int argc, char **argv, char **envp)
         fprintf(stderr, "32 bit environment set up, Large Address Aware: %s.\n", large_address_aware ? "YES" : "NO");
     }
 
-    hook(GetProcAddress(GetModuleHandleA("ntdll"), "LdrFindEntryForAddress"), hook_LdrFindEntryForAddress);
+    hook(GetProcAddress(ntdll_handle, "LdrFindEntryForAddress"), hook_LdrFindEntryForAddress);
 
     VirtualFree(reserved, 0, MEM_RELEASE);
     exe_module = qemu_LoadLibrary(filenameW, 0);
