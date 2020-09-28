@@ -347,4 +347,11 @@ extern uint64_t guest_exception_handler, guest_call_entry;
 extern BOOL is_32_bit;
 extern const WCHAR *qemu_pathname;
 
+/* ntdll string exports. Load them explicitly so we don't accidentally get the Unix ones with
+ * 4 byte WCHARs */
+extern int (* __cdecl ntdll__wcsicmp)( LPCWSTR str1, LPCWSTR str2 );
+extern int (* __cdecl ntdll__wcsnicmp)( LPCWSTR str1, LPCWSTR str2, size_t n );
+extern LPWSTR (* __cdecl ntdll_wcsstr)( LPCWSTR str, LPCWSTR sub );
+extern ULONG (* __cdecl ntdll_wcstoul)(LPCWSTR s, LPWSTR *end, INT base);
+
 #endif /* QEMU_H */

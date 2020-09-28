@@ -56,16 +56,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qemu_module);
 
-/* ntdll string exports. The ones from libwine_port.a are not reliably re-exported
- * by libwine (e.g. not on MacOS toolchains) and I couldn't get linking to this
- * file working reliably either. I suppose linking to msvcrt/ucrtbase and using
- * their WCHAR functions would work, but I want to avoid msvcrt dependencies in
- * qemu to delay its load. */
-extern int __cdecl _wcsicmp( LPCWSTR str1, LPCWSTR str2 );
-extern int __cdecl _wcsnicmp( LPCWSTR str1, LPCWSTR str2, size_t n );
-extern LPWSTR __cdecl wcsstr( LPCWSTR str, LPCWSTR sub );
-extern ULONG __cdecl wcstoul(LPCWSTR s, LPWSTR *end, INT base);
-
 #undef IMAGE_SNAP_BY_ORDINAL
 #define IMAGE_SNAP_BY_ORDINAL(a) (is_32_bit ? IMAGE_SNAP_BY_ORDINAL32(a) : IMAGE_SNAP_BY_ORDINAL64(a))
 
@@ -312,14 +302,14 @@ static WINE_MODREF *find_basename_module( LPCWSTR name )
 {
     PLIST_ENTRY mark, entry;
 
-    if (cached_modref && !_wcsicmp( name, cached_modref->ldr.BaseDllName.Buffer ))
+    if (cached_modref && !ntdll__wcsicmp( name, cached_modref->ldr.BaseDllName.Buffer ))
         return cached_modref;
 
     mark = &qemu_getTEB()->Peb->LdrData->InLoadOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
         LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-        if (!_wcsicmp( name, mod->BaseDllName.Buffer ))
+        if (!ntdll__wcsicmp( name, mod->BaseDllName.Buffer ))
         {
             cached_modref = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
             return cached_modref;
@@ -339,14 +329,14 @@ static WINE_MODREF *find_fullname_module( LPCWSTR name )
 {
     PLIST_ENTRY mark, entry;
 
-    if (cached_modref && !_wcsicmp( name, cached_modref->ldr.FullDllName.Buffer ))
+    if (cached_modref && !ntdll__wcsicmp( name, cached_modref->ldr.FullDllName.Buffer ))
         return cached_modref;
 
     mark = &qemu_getTEB()->Peb->LdrData->InLoadOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
         LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-        if (!_wcsicmp( name, mod->FullDllName.Buffer ))
+        if (!ntdll__wcsicmp( name, mod->FullDllName.Buffer ))
         {
             cached_modref = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
             return cached_modref;
@@ -764,7 +754,7 @@ static BOOL is_dll_native_subsystem( HMODULE module, const IMAGE_NT_HEADERS *nt,
             DWORD len = strlen(name);
             if (len * sizeof(WCHAR) >= sizeof(buffer)) continue;
             ascii_to_unicode( buffer, name, len + 1 );
-            if (!_wcsicmp( buffer, ntdllW ) || !_wcsicmp( buffer, kernel32W ))
+            if (!ntdll__wcsicmp( buffer, ntdllW ) || !ntdll__wcsicmp( buffer, kernel32W ))
             {
                 WINE_TRACE( "%s imports %s, assuming not native\n", wine_dbgstr_w(filename), wine_dbgstr_w(buffer) );
                 return FALSE;
@@ -2060,7 +2050,7 @@ static NTSTATUS find_actctx_dll( LPCWSTR libname, LPWSTR *fullname )
         DWORD dirlen = info->ulAssemblyDirectoryNameLength / sizeof(WCHAR);
 
         p++;
-        if (_wcsnicmp( p, info->lpAssemblyDirectoryName, dirlen ) || _wcsicmp( p + dirlen, dotManifestW ))
+        if (ntdll__wcsnicmp( p, info->lpAssemblyDirectoryName, dirlen ) || ntdll__wcsicmp( p + dirlen, dotManifestW ))
         {
             /* manifest name does not match directory name, so it's not a global
              * windows/winsxs manifest; use the manifest directory name instead */
@@ -2201,7 +2191,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
 
             /* Load anything that is placed in system32 from qemu's guest DLL dir instead, but
              * pretend that the file is from system32. */
-            if (!_wcsnicmp(filename, sysdir, sysdirlen - 1))
+            if (!ntdll__wcsnicmp(filename, sysdir, sysdirlen - 1))
             {
                 WCHAR *filename2;
 
@@ -2258,7 +2248,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
      *
      * This thing should be made more generic to have a switch between native, wine PE build,
      * hangover wrapper. */
-    if (wcsstr(libname, fusionW))
+    if (ntdll_wcsstr(libname, fusionW))
     {
         WCHAR *filename2;
         convert = RtlDosPathNameToNtPathName_U( libname, &nt_name_orig, &file_part, NULL );
@@ -2274,7 +2264,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
         convert = RtlDosPathNameToNtPathName_U( filename2, &nt_name, &file_part, NULL );
         my_free(filename2);
     }
-    else if (!_wcsnicmp(libname, sysdir, sysdirlen - 1))
+    else if (!ntdll__wcsnicmp(libname, sysdir, sysdirlen - 1))
     {
         WCHAR *filename2;
 
@@ -2550,7 +2540,7 @@ static NTSTATUS query_dword_option( HANDLE hkey, LPCWSTR name, ULONG *value )
     if (info->Type != REG_DWORD)
     {
         buffer[size / sizeof(WCHAR)] = 0;
-        *value = wcstoul( (WCHAR *)info->Data, 0, 16 );
+        *value = ntdll_wcstoul( (WCHAR *)info->Data, 0, 16 );
     }
     else memcpy( value, info->Data, sizeof(*value) );
     return status;
