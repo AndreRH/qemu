@@ -1275,7 +1275,7 @@ static void hook(void *to_hook, const void *replace)
     VirtualProtect(hooked_function, sizeof(*hooked_function), old_protect, &old_protect);
 }
 
-int main(int argc, char **argv, char **envp)
+int CDECL main(int argc, char **argv, char **envp)
 {
     HMODULE exe_module, user_module;
     int optind, i;
