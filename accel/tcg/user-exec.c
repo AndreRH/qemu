@@ -39,22 +39,9 @@
 #undef EDI
 #undef EIP
 #ifdef __linux__
-#include <sys/ucontext.h>
 #endif
 
 __thread uintptr_t helper_retaddr;
-
-//#define DEBUG_SIGNAL
-
-/* exit the current TB from a signal handler. The host registers are
-   restored in a state compatible with the CPU emulator
- */
-static void cpu_exit_tb_from_sighandler(CPUState *cpu, sigset_t *old_set)
-{
-    /* XXX: use siglongjmp ? */
-    sigprocmask(SIG_SETMASK, old_set, NULL);
-    cpu_loop_exit_noexc(cpu);
-}
 
 /* 'pc' is the host PC at which the exception was raised. 'address' is
    the effective address of the memory exception. 'is_write' is 1 if a
@@ -166,7 +153,9 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
              * immediately.  Clear helper_retaddr for next execution.
              */
             clear_helper_retaddr();
-            cpu_exit_tb_from_sighandler(cpu, old_set);
+            fprintf(stderr, "Broken codepath\n");
+            //cpu_exit_tb_from_sighandler(cpu, old_set);
+            g_assert_not_reached();
             /* NORETURN */
 
         default:
@@ -182,7 +171,7 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
      * There is no way the target can handle this other than raising
      * an exception.  Undo signal and retaddr state prior to longjmp.
      */
-    sigprocmask(SIG_SETMASK, old_set, NULL);
+//     sigprocmask(SIG_SETMASK, old_set, NULL);
     clear_helper_retaddr();
 
     cc = CPU_GET_CLASS(cpu);
@@ -278,28 +267,7 @@ void *probe_access(CPUArchState *env, target_ulong addr, int size,
 int cpu_signal_handler(int host_signum, void *pinfo,
                        void *puc)
 {
-    siginfo_t *info = pinfo;
-#if defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
-    ucontext_t *uc = puc;
-#elif defined(__OpenBSD__)
-    struct sigcontext *uc = puc;
-#else
-    ucontext_t *uc = puc;
-#endif
-    unsigned long pc;
-    int trapno;
-
-#ifndef REG_EIP
-/* for glibc 2.1 */
-#define REG_EIP    EIP
-#define REG_ERR    ERR
-#define REG_TRAPNO TRAPNO
-#endif
-    pc = EIP_sig(uc);
-    trapno = TRAP_sig(uc);
-    return handle_cpu_signal(pc, info,
-                             trapno == 0xe ? (ERROR_sig(uc) >> 1) & 1 : 0,
-                             &MASK_sig(uc));
+    return -1;
 }
 
 #elif defined(__x86_64__)
@@ -321,6 +289,14 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 #define TRAP_sig(context)     ((context)->uc_mcontext.mc_trapno)
 #define ERROR_sig(context)    ((context)->uc_mcontext.mc_err)
 #define MASK_sig(context)     ((context)->uc_sigmask)
+#elif 1
+#include <windows.h>
+#define PC_sig(context)       (context->ContextRecord->Rip)
+/* FIXME: Trick these things into somehow making the 2nd parameter is_write. */
+#define TRAP_sig(context)     (0)
+#define ERROR_sig(context)    (0)
+static sigset_t dummy;
+#define MASK_sig(context)     (dummy)
 #else
 #define PC_sig(context)       ((context)->uc_mcontext.gregs[REG_RIP])
 #define TRAP_sig(context)     ((context)->uc_mcontext.gregs[REG_TRAPNO])
@@ -333,7 +309,9 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 {
     siginfo_t *info = pinfo;
     unsigned long pc;
-#if defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
+#if 1
+    EXCEPTION_POINTERS *uc = puc;
+#elif defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
     ucontext_t *uc = puc;
 #elif defined(__OpenBSD__)
     struct sigcontext *uc = puc;
@@ -593,6 +571,10 @@ struct esr_context {
 };
 #endif
 
+#if defined(WIN32)
+#include <windows.h>
+#endif
+
 static inline struct _aarch64_ctx *first_ctx(ucontext_t *uc)
 {
     return (struct _aarch64_ctx *)&uc->uc_mcontext.__reserved;
@@ -607,7 +589,7 @@ int cpu_signal_handler(int host_signum, void *pinfo, void *puc)
 {
     siginfo_t *info = pinfo;
     ucontext_t *uc = puc;
-    uintptr_t pc = uc->uc_mcontext.pc;
+    uintptr_t pc = (uintptr_t)info->si_addr;
     bool is_write;
     struct _aarch64_ctx *hdr;
     struct esr_context const *esrctx = NULL;

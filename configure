@@ -110,7 +110,7 @@ update_cxxflags() {
 
     for arg in $QEMU_CFLAGS; do
         case $arg in
-            -Wstrict-prototypes|-Wmissing-prototypes|-Wnested-externs|\
+            -Wstrict-prototypes|-Wmissing-prototypes|\
             -Wold-style-declaration|-Wold-style-definition|-Wredundant-decls)
                 ;;
             -std=gnu99)
@@ -255,6 +255,8 @@ supported_target() {
                 print_error "Target '$target' is only available on a Linux host"
                 return 1
             fi
+            ;;
+        *-windows-user)
             ;;
         *-bsd-user)
             if test "$bsd" != "yes"; then
@@ -436,6 +438,7 @@ profiler="no"
 cocoa="no"
 softmmu="yes"
 linux_user="no"
+windows_user="no"
 bsd_user="no"
 blobs="yes"
 edk2_blobs="no"
@@ -591,7 +594,7 @@ ld="${LD-${cross_prefix}ld}"
 ranlib="${RANLIB-${cross_prefix}ranlib}"
 nm="${NM-${cross_prefix}nm}"
 strip="${STRIP-${cross_prefix}strip}"
-windres="${WINDRES-${cross_prefix}windres}"
+windres="${WINDRES-${cross_prefix}wrc}"
 pkg_config_exe="${PKG_CONFIG-${cross_prefix}pkg-config}"
 query_pkg_config() {
     "${pkg_config_exe}" ${QEMU_PKG_CONFIG_FLAGS} "$@"
@@ -608,8 +611,7 @@ ARFLAGS="${ARFLAGS-rv}"
 # 2s-complement style results. (Both clang and gcc agree that it
 # provides these semantics.)
 QEMU_CFLAGS="-fno-strict-aliasing -fno-common -fwrapv -std=gnu99 $QEMU_CFLAGS"
-QEMU_CFLAGS="-Wall -Wundef -Wwrite-strings -Wmissing-prototypes $QEMU_CFLAGS"
-QEMU_CFLAGS="-Wstrict-prototypes -Wredundant-decls $QEMU_CFLAGS"
+QEMU_CFLAGS="-Wall -Wwrite-strings -Wmissing-prototypes $QEMU_CFLAGS"
 QEMU_CFLAGS="-D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE $QEMU_CFLAGS"
 QEMU_INCLUDES="-iquote . -iquote \$(SRC_PATH) -iquote \$(SRC_PATH)/accel/tcg -iquote \$(SRC_PATH)/include"
 QEMU_INCLUDES="$QEMU_INCLUDES -iquote \$(SRC_PATH)/disas/libvixl"
@@ -660,6 +662,8 @@ EOF
 
 if check_define __linux__ ; then
   targetos="Linux"
+elif check_define __APPLE__; then
+  targetos='Darwin'
 elif check_define _WIN32 ; then
   targetos='MINGW32'
 elif check_define __OpenBSD__ ; then
@@ -676,8 +680,6 @@ elif check_define __DragonFly__ ; then
   targetos='DragonFly'
 elif check_define __NetBSD__; then
   targetos='NetBSD'
-elif check_define __APPLE__; then
-  targetos='Darwin'
 else
   # This is a fatal error, but don't report it yet, because we
   # might be going to just print the --help text, or it might
@@ -811,6 +813,7 @@ MINGW32*)
   hax="yes"
   vhost_user="no"
   audio_possible_drivers="dsound sdl"
+  windows_user="yes"
   if check_include dsound.h; then
     audio_drv_list="dsound"
   else
@@ -1274,6 +1277,7 @@ for opt do
   --enable-system) softmmu="yes"
   ;;
   --disable-user)
+      windows_user="no" ;
       linux_user="no" ;
       bsd_user="no" ;
   ;;
@@ -1281,6 +1285,10 @@ for opt do
   --disable-linux-user) linux_user="no"
   ;;
   --enable-linux-user) linux_user="yes"
+  ;;
+  --disable-windows-user) windows_user="no"
+  ;;
+  --enable-windows-user) windows_user="yes"
   ;;
   --disable-bsd-user) bsd_user="no"
   ;;
@@ -1702,7 +1710,7 @@ if [ "$ARCH" = "unknown" ]; then
   linux_user="no"
 fi
 
-if [ "$bsd_user" = "no" -a "$linux_user" = "no" -a "$softmmu" = "no" ] ; then
+if [ "$bsd_user" = "no" -a "$linux_user" = "no" -a "$windows_user" = "no" -a "$softmmu" = "no" ] ; then
   tcg="no"
 fi
 
@@ -1715,6 +1723,9 @@ if [ "$softmmu" = "yes" ]; then
 fi
 if [ "$linux_user" = "yes" ]; then
     mak_wilds="${mak_wilds} $source_path/default-configs/*-linux-user.mak"
+fi
+if [ "$windows_user" = "yes" ]; then
+    mak_wilds="${mak_wilds} $source_path/default-configs/*-windows-user.mak"
 fi
 if [ "$bsd_user" = "yes" ]; then
     mak_wilds="${mak_wilds} $source_path/default-configs/*-bsd-user.mak"
@@ -1839,6 +1850,7 @@ disabled with --disable-FEATURE, default is enabled if available:
   system          all system emulation targets
   user            supported user emulation targets
   linux-user      all linux usermode emulation targets
+  windows-user    all windows usermode emulation targets
   bsd-user        all BSD usermode emulation targets
   docs            build documentation
   guest-agent     build the QEMU Guest Agent
@@ -2067,7 +2079,6 @@ add_to warn_flags -Wformat-y2k
 add_to warn_flags -Winit-self
 add_to warn_flags -Wignored-qualifiers
 add_to warn_flags -Wempty-body
-add_to warn_flags -Wnested-externs
 add_to warn_flags -Wendif-labels
 add_to warn_flags -Wexpansion-to-defined
 
@@ -4317,6 +4328,7 @@ fi
 ##########################################
 # attr probe
 
+attr=no
 if test "$attr" != "no" ; then
   cat > $TMPC <<EOF
 #include <stdio.h>
@@ -4942,7 +4954,7 @@ int main(void)
 }
 EOF
 if compile_prog "" "" ; then
-  ppoll=yes
+  ppoll=no
 fi
 
 # check for prctl(PR_SET_TIMERSLACK , ... ) support
@@ -5459,7 +5471,7 @@ cat > $TMPC << EOF
 int main(void) { return madvise(NULL, 0, MADV_DONTNEED); }
 EOF
 if compile_prog "" "" ; then
-    madvise=yes
+    madvise=no
 fi
 
 ##########################################
@@ -5472,7 +5484,7 @@ cat > $TMPC << EOF
 int main(void) { return posix_madvise(NULL, 0, POSIX_MADV_DONTNEED); }
 EOF
 if compile_prog "" "" ; then
-    posix_madvise=yes
+    posix_madvise=no
 fi
 
 ##########################################
@@ -6089,7 +6101,7 @@ int main(void) {
 }
 EOF
 if compile_prog "" "" ; then
-    have_fsxattr=yes
+    have_fsxattr=no
 fi
 
 ##########################################
@@ -6812,6 +6824,14 @@ EOF
 else
     echo "No C++ compiler available; disabling C++ specific optional code"
     cxx=
+fi
+
+if [ "$windows_user" = yes ]; then
+    if [ "$darwin" = yes ]; then
+        textseg_ldflags="-image_base 0x600000000"
+    else
+        textseg_ldflags="-Wl,-Ttext-segment=0x600000000"
+    fi
 fi
 
 echo_version() {
@@ -8081,6 +8101,7 @@ esac
 target_softmmu="no"
 target_user_only="no"
 target_linux_user="no"
+target_windows_user="no"
 target_bsd_user="no"
 case "$target" in
   ${target_name}-softmmu)
@@ -8089,6 +8110,10 @@ case "$target" in
   ${target_name}-linux-user)
     target_user_only="yes"
     target_linux_user="yes"
+    ;;
+  ${target_name}-windows-user)
+    target_user_only="yes"
+    target_windows_user="yes"
     ;;
   ${target_name}-bsd-user)
     target_user_only="yes"
@@ -8347,6 +8372,9 @@ if test "$target_user_only" = "yes" ; then
 fi
 if test "$target_linux_user" = "yes" ; then
   echo "CONFIG_LINUX_USER=y" >> $config_target_mak
+fi
+if test "$target_windows_user" = "yes" ; then
+  echo "CONFIG_WINDOWS_USER=y" >> $config_target_mak
 fi
 list=""
 if test ! -z "$gdb_xml_files" ; then

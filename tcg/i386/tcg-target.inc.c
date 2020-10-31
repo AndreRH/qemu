@@ -92,7 +92,7 @@ static const int tcg_target_reg_alloc_order[] = {
 
 static const int tcg_target_call_iarg_regs[] = {
 #if TCG_TARGET_REG_BITS == 64
-#if defined(_WIN64)
+#if defined(_WIN64) && 0
     TCG_REG_RCX,
     TCG_REG_RDX,
 #else
@@ -3755,7 +3755,7 @@ static const int tcg_target_callee_save_regs[] = {
 #if TCG_TARGET_REG_BITS == 64
     TCG_REG_RBP,
     TCG_REG_RBX,
-#if defined(_WIN64)
+#if defined(_WIN64) && 0
     TCG_REG_RDI,
     TCG_REG_RSI,
 #endif
@@ -3925,7 +3925,7 @@ static void tcg_target_init(TCGContext *s)
     tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_EDX);
     tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_ECX);
     if (TCG_TARGET_REG_BITS == 64) {
-#if !defined(_WIN64)
+#if !defined(_WIN64) || 1
         tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_RDI);
         tcg_regset_set_reg(tcg_target_call_clobber_regs, TCG_REG_RSI);
 #endif
@@ -3948,7 +3948,7 @@ typedef struct {
 /* We're expecting a 2 byte uleb128 encoded value.  */
 QEMU_BUILD_BUG_ON(FRAME_SIZE >= (1 << 14));
 
-#if !defined(__ELF__)
+#if 0 && !defined(__ELF__)
     /* Host machine without ELF. */
 #elif TCG_TARGET_REG_BITS == 64
 #define ELF_HOST_MACHINE EM_X86_64
