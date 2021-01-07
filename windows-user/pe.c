@@ -81,7 +81,7 @@ enum loadorder
     LO_DEFAULT          /* nothing specified, use default strategy */
 };
 
-static enum loadorder get_load_order( const WCHAR *app_name, const WCHAR *path )
+static enum loadorder get_load_order( const WCHAR *app_name, const UNICODE_STRING *nt_name )
 {
     return LO_NATIVE;
 }
@@ -325,18 +325,23 @@ static WINE_MODREF *find_basename_module( LPCWSTR name )
  * Find a module from its full path name.
  * The loader_section must be locked while calling this function
  */
-static WINE_MODREF *find_fullname_module( LPCWSTR name )
+static WINE_MODREF *find_fullname_module( const UNICODE_STRING *nt_name )
 {
     PLIST_ENTRY mark, entry;
+    UNICODE_STRING name = *nt_name;
 
-    if (cached_modref && !ntdll__wcsicmp( name, cached_modref->ldr.FullDllName.Buffer ))
+    if (name.Length <= 4 * sizeof(WCHAR)) return NULL;
+    name.Length -= 4 * sizeof(WCHAR);  /* for \??\ prefix */
+    name.Buffer += 4;
+
+    if (cached_modref && RtlEqualUnicodeString( &name, &cached_modref->ldr.FullDllName, TRUE ))
         return cached_modref;
 
     mark = &qemu_getTEB()->Peb->LdrData->InLoadOrderModuleList;
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
         LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-        if (!ntdll__wcsicmp( name, mod->FullDllName.Buffer ))
+        if (RtlEqualUnicodeString( &name, &mod->FullDllName, TRUE ))
         {
             cached_modref = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
             return cached_modref;
@@ -966,8 +971,9 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
  * Allocate a WINE_MODREF structure and add it to the process list
  * The loader_section must be locked while calling this function.
  */
-static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
+static WINE_MODREF *alloc_module( HMODULE hModule, const UNICODE_STRING *nt_name )
 {
+    WCHAR *buffer;
     WINE_MODREF *wm;
     const WCHAR *p;
     const IMAGE_NT_HEADERS *nt = RtlImageNtHeader(hModule);
@@ -988,9 +994,16 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     wm->ldr.TimeDateStamp = 0;
     wm->ldr.ActivationContext = 0;
 
-    RtlCreateUnicodeString( &wm->ldr.FullDllName, filename );
-    if ((p = strrchrW( wm->ldr.FullDllName.Buffer, '\\' ))) p++;
-    else p = wm->ldr.FullDllName.Buffer;
+    if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, nt_name->Length - 3 * sizeof(WCHAR) )))
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, wm );
+        return NULL;
+    }
+    memcpy( buffer, nt_name->Buffer + 4 /* \??\ prefix */, nt_name->Length - 4 * sizeof(WCHAR) );
+    buffer[nt_name->Length/sizeof(WCHAR) - 4] = 0;
+    if ((p = strrchrW( buffer, '\\' ))) p++;
+    else p = buffer;
+    RtlInitUnicodeString( &wm->ldr.FullDllName, buffer );
     RtlInitUnicodeString( &wm->ldr.BaseDllName, p );
 
     if (!(nt->FileHeader.Characteristics & IMAGE_FILE_DLL) || !is_dll_native_subsystem( hModule, nt, p ))
@@ -1699,9 +1712,46 @@ static NTSTATUS perform_relocations( void *module, SIZE_T len )
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
+static NTSTATUS read_nt_header(HANDLE file, struct nt_header *nt, SIZE_T *header_size)
 {
     IMAGE_DOS_HEADER dos;
+    DWORD read;
+    BOOL ret;
+
+    SetFilePointer(file, 0, NULL, FILE_BEGIN);
+    ret = ReadFile(file, &dos, sizeof(dos), &read, NULL);
+    if (!ret || read != sizeof(dos))
+    {
+        WINE_ERR("Failed to read DOS header.\n");
+        return STATUS_INVALID_IMAGE_NOT_MZ;
+    }
+    if (dos.e_magic != IMAGE_DOS_SIGNATURE)
+    {
+        WINE_ERR("Invalid DOS signature.\n");
+        return STATUS_INVALID_IMAGE_NOT_MZ;
+    }
+
+    SetFilePointer(file, dos.e_lfanew, NULL, FILE_BEGIN);
+    ret = ReadFile(file, nt, sizeof(*nt), &read, NULL);
+    if (!ret || read != sizeof(*nt))
+    {
+        WINE_ERR("Failed to read PE header.\n");
+        return STATUS_INVALID_IMAGE_FORMAT;
+    }
+    if (nt->Signature != IMAGE_NT_SIGNATURE)
+    {
+        WINE_ERR("Invalid NT signature.\n");
+        if (nt->Signature == IMAGE_OS2_SIGNATURE) return STATUS_INVALID_IMAGE_NE_FORMAT;
+        return STATUS_INVALID_IMAGE_PROTECT;
+    }
+
+    if (header_size)
+        *header_size = dos.e_lfanew + sizeof(nt->Signature) + sizeof(nt->FileHeader);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
+{
     struct nt_header nt;
     BOOL ret;
     DWORD read;
@@ -1714,48 +1764,13 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
     NTSTATUS status = STATUS_DLL_NOT_FOUND;
     DWORD protect, old_protect;
 
-    SetFilePointer(file, 0, NULL, FILE_BEGIN);
-    ret = ReadFile(file, &dos, sizeof(dos), &read, NULL);
-    if (!ret || read != sizeof(dos))
-    {
-        WINE_ERR("Failed to read DOS header.\n");
-        status = STATUS_INVALID_IMAGE_NOT_MZ;
-        goto error;
-    }
-    if (dos.e_magic != IMAGE_DOS_SIGNATURE)
-    {
-        WINE_ERR("Invalid DOS signature.\n");
-        status = STATUS_INVALID_IMAGE_NOT_MZ;
-        goto error;
-    }
-
-    SetFilePointer(file, dos.e_lfanew, NULL, FILE_BEGIN);
-    ret = ReadFile(file, &nt, sizeof(nt), &read, NULL);
-    if (!ret || read != sizeof(nt))
-    {
-        WINE_ERR("Failed to read PE header.\n");
-        status = STATUS_INVALID_IMAGE_FORMAT;
-        goto error;
-    }
-    if (nt.Signature != IMAGE_NT_SIGNATURE)
-    {
-        WINE_ERR("Invalid NT signature.\n");
-        if (nt.Signature == IMAGE_OS2_SIGNATURE) status = STATUS_INVALID_IMAGE_NE_FORMAT;
-        status = STATUS_INVALID_IMAGE_PROTECT;
-        goto error;
-    }
-
-    fixed_header_size = dos.e_lfanew + sizeof(nt.Signature) + sizeof(nt.FileHeader);
+    status = read_nt_header(file, &nt, &fixed_header_size);
+    if (status != STATUS_SUCCESS)
+        return status;
 
     switch (nt.FileHeader.Machine)
     {
         case IMAGE_FILE_MACHINE_I386:
-            if (nt.opt.hdr64.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC)
-            {
-                WINE_ERR("Wrong optional header magic.\n");
-                status = STATUS_INVALID_IMAGE_FORMAT;
-                goto error;
-            }
             image_base = (void *)(DWORD_PTR)nt.opt.hdr32.ImageBase;
             image_size = ROUND_SIZE(nt.opt.hdr32.SizeOfImage);
             header_size = nt.opt.hdr32.SizeOfHeaders;
@@ -1763,12 +1778,6 @@ static NTSTATUS map_library(HANDLE file, void **module, SIZE_T *len)
             fixed_header_size += sizeof(nt.opt.hdr32);
             break;
         case IMAGE_FILE_MACHINE_AMD64:
-            if (nt.opt.hdr64.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
-            {
-                WINE_ERR("Wrong optional header magic.\n");
-                status = STATUS_INVALID_IMAGE_FORMAT;
-                goto error;
-            }
             image_base = (void *)nt.opt.hdr64.ImageBase;
             image_size = ROUND_SIZE(nt.opt.hdr64.SizeOfImage);
             header_size = nt.opt.hdr64.SizeOfHeaders;
@@ -1927,7 +1936,7 @@ error:
 /******************************************************************************
  *	load_native_dll  (internal)
  */
-static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
+static NTSTATUS load_native_dll( LPCWSTR load_path, const UNICODE_STRING *nt_name, HANDLE file,
                                  DWORD flags, WINE_MODREF** pwm )
 {
     void *module;
@@ -1936,7 +1945,7 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
     WINE_MODREF *wm;
     NTSTATUS status;
 
-    WINE_TRACE("Trying native dll %s\n", wine_dbgstr_w(name));
+    WINE_TRACE("Trying native dll %s\n", debugstr_us(nt_name));
 
     status = map_library(file, &module, &len);
     if (status != STATUS_SUCCESS && status != STATUS_IMAGE_NOT_AT_BASE)
@@ -1955,7 +1964,7 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
 
     /* create the MODREF */
 
-    if (!(wm = alloc_module( module, name )))
+    if (!(wm = alloc_module( module, nt_name )))
     {
         status = STATUS_NO_MEMORY;
         goto done;
@@ -2118,20 +2127,204 @@ static WCHAR *get_guest_dll_path(void)
 }
 
 /***********************************************************************
+ *	open_dll_file
+ *
+ * Open a file for a new dll. Helper for find_dll_file.
+ * Also convert to an NT path, and implement redirection for system32 dll's.
+ */
+static NTSTATUS open_dll_file( const WCHAR *libname, UNICODE_STRING *nt_name, WINE_MODREF **pwm, HANDLE *handle )
+{
+    FILE_BASIC_INFORMATION info;
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK io;
+    NTSTATUS status = STATUS_SUCCESS;
+    UNICODE_STRING nt_name_new;
+    WCHAR *sysdir, *qemu_sysdir = get_guest_dll_path();
+    ULONG len, sysdirlen;
+    struct nt_header nt;
+    static const WCHAR fusionW[] = {'f','u','s','i','o','n','.','d','l','l',0};
+
+    nt_name_new.Buffer = NULL;
+
+    status = RtlDosPathNameToNtPathName_U_WithStatus( libname, nt_name, NULL, NULL );
+    if (status != STATUS_SUCCESS)
+        return status;
+
+    if ((*pwm = find_fullname_module( nt_name )))
+    {
+        *handle = NULL;
+        return STATUS_SUCCESS;
+    }
+
+    sysdirlen = GetSystemDirectoryW( NULL, 0 );
+    sysdir = my_alloc(sizeof(*sysdir) * sysdirlen);
+    GetSystemDirectoryW(sysdir, sysdirlen);
+
+    /* Load anything that is placed in system32 from qemu's guest DLL dir instead, but
+     *  pretend that the file is from system32.
+     *
+     * Also HACK: Load fusion.dll from qemu's guest DLL dir no matter where it is found.
+     * .NET places it in C:\windows\Microsoft.NET\Framework\fusion.dll and native fusion
+     * does not work because it tries to create reparse points. We need Wine's fusion.
+     *
+     * This thing should be made more generic to have a switch between native, wine PE build,
+     * hangover wrapper. */
+    if (ntdll_wcsstr(libname, fusionW))
+    {
+        WCHAR *filename2;
+
+        len = strlenW(qemu_sysdir) + strlenW(fusionW) + 1;
+        filename2 = my_alloc(len * sizeof(*filename2));
+        strcpyW(filename2, qemu_sysdir);
+        strcatW(filename2, fusionW);
+
+        WINE_TRACE("Loading %s instead of %s\n", wine_dbgstr_w(filename2), wine_dbgstr_w(libname));
+
+        status = RtlDosPathNameToNtPathName_U_WithStatus( filename2, &nt_name_new, NULL, NULL );
+        my_free(filename2);
+
+        if (status != STATUS_SUCCESS)
+            goto done;
+    }
+    else if (!ntdll__wcsnicmp(libname, sysdir, sysdirlen - 1))
+    {
+        WCHAR *filename2;
+
+        len = strlenW(qemu_sysdir) + strlenW(libname) + 1;
+        filename2 = my_alloc(len * sizeof(*filename2));
+        strcpyW(filename2, qemu_sysdir);
+        strcatW(filename2, libname + sysdirlen);
+
+        WINE_TRACE("Loading %s instead of %s\n", wine_dbgstr_w(filename2), wine_dbgstr_w(libname));
+
+        status = RtlDosPathNameToNtPathName_U_WithStatus( filename2, &nt_name_new, NULL, NULL );
+        my_free(filename2);
+
+        if (status != STATUS_SUCCESS)
+            goto done;
+    }
+
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = nt_name_new.Buffer ? &nt_name_new : nt_name;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+    if ((status = NtOpenFile( handle, GENERIC_READ | SYNCHRONIZE, &attr, &io,
+                              FILE_SHARE_READ | FILE_SHARE_DELETE,
+                              FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE )))
+    {
+        if (status != STATUS_OBJECT_PATH_NOT_FOUND &&
+            status != STATUS_OBJECT_NAME_NOT_FOUND &&
+            !NtQueryAttributesFile( &attr, &info ))
+        {
+            /* if the file exists but failed to open, report the error */
+            goto done;
+        }
+        /* otherwise continue searching */
+        status = STATUS_DLL_NOT_FOUND;
+        goto done;
+    }
+
+    if ((status = read_nt_header( *handle, &nt, NULL)))
+        goto done;
+
+    switch (nt.FileHeader.Machine)
+    {
+        case IMAGE_FILE_MACHINE_I386:
+            if (nt.opt.hdr64.Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+            {
+                WINE_ERR("Wrong optional header magic.\n");
+                status = STATUS_INVALID_IMAGE_FORMAT;
+                goto done;
+            }
+            if (!is_32_bit)
+            {
+                WINE_TRACE("Wrong bitsize.\n");
+                status = STATUS_IMAGE_MACHINE_TYPE_MISMATCH;
+                goto done;
+            }
+            break;
+        case IMAGE_FILE_MACHINE_AMD64:
+            if (nt.opt.hdr64.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+            {
+                WINE_ERR("Wrong optional header magic.\n");
+                status = STATUS_INVALID_IMAGE_FORMAT;
+                goto done;
+            }
+            if (is_32_bit)
+            {
+                WINE_TRACE("Wrong bitsize.\n");
+                status = STATUS_IMAGE_MACHINE_TYPE_MISMATCH;
+                goto done;
+            }
+	    break;
+        default:
+            WINE_ERR("Unsupported machine %d.\n", nt.FileHeader.Machine);
+            status = STATUS_INVALID_IMAGE_FORMAT;
+            goto done;
+    }
+
+done:
+    RtlFreeUnicodeString( &nt_name_new );
+    my_free(sysdir);
+    return status;
+}
+
+/***********************************************************************
+ *	search_dll_file
+ *
+ * Search for dll in the specified paths.
+ */
+static NTSTATUS search_dll_file( const WCHAR *paths, const WCHAR *search, UNICODE_STRING *nt_name,
+                                 WINE_MODREF **pwm, HANDLE *handle )
+{
+    WCHAR *name;
+    NTSTATUS status = STATUS_DLL_NOT_FOUND;
+    ULONG len = strlenW( paths );
+
+    len += strlenW( search ) + 2;
+
+    if (!(name = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+        return STATUS_NO_MEMORY;
+
+    while (*paths)
+    {
+        LPCWSTR ptr = paths;
+
+        while (*ptr && *ptr != ';') ptr++;
+        len = ptr - paths;
+        if (*ptr == ';') ptr++;
+        memcpy( name, paths, len * sizeof(WCHAR) );
+        if (len && name[len - 1] != '\\') name[len++] = '\\';
+        strcpyW( name + len, search );
+
+        WINE_TRACE("searching %s\n", wine_dbgstr_w(name));
+
+        status = open_dll_file( name, nt_name, pwm, handle );
+        if (status != STATUS_IMAGE_MACHINE_TYPE_MISMATCH &&
+            status != STATUS_DLL_NOT_FOUND)
+            goto done;
+
+        paths = ptr;
+    }
+
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, name );
+    return status;
+}
+
+/***********************************************************************
  *	find_dll_file
  *
  * Find the file (or already loaded module) for a given dll name.
  */
 static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
-                               WCHAR *filename, ULONG *size, WINE_MODREF **pwm, HANDLE *handle )
+                               UNICODE_STRING *nt_name, WINE_MODREF **pwm, HANDLE *handle )
 {
-    OBJECT_ATTRIBUTES attr;
-    IO_STATUS_BLOCK io;
-    UNICODE_STRING nt_name, nt_name_orig;
-    WCHAR *file_part, *ext, *dllname, *sysdir, *qemu_sysdir = get_guest_dll_path();
-    ULONG len, sysdirlen;
-    BOOLEAN convert;
-    static const WCHAR fusionW[] = {'f','u','s','i','o','n','.','d','l','l',0};
+    WCHAR *ext, *dllname;
+    NTSTATUS status;
 
     /* first append .dll if needed */
 
@@ -2146,19 +2339,17 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
         libname = dllname;
     }
 
-    sysdirlen = GetSystemDirectoryW( NULL, 0 );
-    sysdir = my_alloc(sizeof(*sysdir) * sysdirlen);
-    GetSystemDirectoryW(sysdir, sysdirlen);
-
-    nt_name.Buffer = NULL;
-    nt_name_orig.Buffer = NULL;
+    nt_name->Buffer = NULL;
 
     if (!contains_path( libname ))
     {
-        NTSTATUS status;
         WCHAR *fullname = NULL;
 
-        if ((*pwm = find_basename_module( libname )) != NULL) goto found;
+        if ((*pwm = find_basename_module( libname )) != NULL)
+        {
+            status = STATUS_SUCCESS;
+            goto done;
+        }
 
         status = find_actctx_dll( libname, &fullname );
         if (status == STATUS_SUCCESS)
@@ -2168,169 +2359,19 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname,
             libname = dllname = fullname;
         }
         else if (status != STATUS_SXS_KEY_NOT_FOUND)
-        {
-            RtlFreeHeap( GetProcessHeap(), 0, dllname );
-            return status;
-        }
+            goto done;
     }
 
     if (RtlDetermineDosPathNameType_U( libname ) == RELATIVE_PATH)
-    {
-        /* we need to search for it */
-        len = RtlDosSearchPath_U( load_path, libname, NULL, *size, filename, &file_part );
-        /* If we haven't found it yet, try to search in qemu's DLL directory. There may be libs in there
-         * that are not in system32, e.g. libwine.dll. Don't bother to fake the directory of those files
-         * as they should only be internal files and not directly accessed by the app. */
-        if (!len)
-            len = RtlDosSearchPath_U( qemu_sysdir, libname, NULL, *size, filename, &file_part );
-
-        if (len)
-        {
-            if (len >= *size) goto overflow;
-            if ((*pwm = find_fullname_module( filename )) || !handle) goto found;
-
-            /* Load anything that is placed in system32 from qemu's guest DLL dir instead, but
-             * pretend that the file is from system32. */
-            if (!ntdll__wcsnicmp(filename, sysdir, sysdirlen - 1))
-            {
-                WCHAR *filename2;
-
-                len = strlenW(qemu_sysdir) + strlenW(filename) + 1;
-                filename2 = my_alloc(len * sizeof(*filename2));
-                strcpyW(filename2, qemu_sysdir);
-                strcatW(filename2, filename + sysdirlen);
-
-                convert = RtlDosPathNameToNtPathName_U( filename2, &nt_name, NULL, NULL );
-                my_free(filename2);
-            }
-            else
-            {
-                convert = RtlDosPathNameToNtPathName_U( filename, &nt_name, NULL, NULL );
-            }
-
-            if (!convert)
-            {
-                RtlFreeHeap( GetProcessHeap(), 0, dllname );
-                my_free(sysdir);
-                return STATUS_NO_MEMORY;
-            }
-            attr.Length = sizeof(attr);
-            attr.RootDirectory = 0;
-            attr.Attributes = OBJ_CASE_INSENSITIVE;
-            attr.ObjectName = &nt_name;
-            attr.SecurityDescriptor = NULL;
-            attr.SecurityQualityOfService = NULL;
-            if (NtOpenFile( handle, GENERIC_READ|SYNCHRONIZE, &attr, &io, FILE_SHARE_READ|FILE_SHARE_DELETE, FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE )) *handle = 0;
-            goto found;
-        }
-
-        /* not found */
-
-        if (!contains_path( libname ))
-        {
-            /* if libname doesn't contain a path at all, we simply return the name as is,
-             * to be loaded as builtin */
-            len = strlenW(libname) * sizeof(WCHAR);
-            if (len >= *size) goto overflow;
-            strcpyW( filename, libname );
-            goto found;
-        }
-    }
-
-    /* absolute path name, or relative path name but not found above */
-
-    /* Load anything that is placed in system32 from qemu's guest DLL dir instead, but
-     *  pretend that the file is from system32.
-     *
-     * Also HACK: Load fusion.dll from qemu's guest DLL dir no matter where it is found.
-     * .NET places it in C:\windows\Microsoft.NET\Framework\fusion.dll and native fusion
-     * does not work because it tries to create reparse points. We need Wine's fusion.
-     *
-     * This thing should be made more generic to have a switch between native, wine PE build,
-     * hangover wrapper. */
-    if (ntdll_wcsstr(libname, fusionW))
-    {
-        WCHAR *filename2;
-        convert = RtlDosPathNameToNtPathName_U( libname, &nt_name_orig, &file_part, NULL );
-
-        len = strlenW(qemu_sysdir) + strlenW(fusionW) + 1;
-        filename2 = my_alloc(len * sizeof(*filename2));
-        strcpyW(filename2, qemu_sysdir);
-        strcatW(filename2, fusionW);
-
-        WINE_TRACE("Loading %s instead of %s\n", wine_dbgstr_w(filename2), wine_dbgstr_w(libname));
-
-        /* FIXME: File_part? We'll probably only get here if the original path was absolute anyway. */
-        convert = RtlDosPathNameToNtPathName_U( filename2, &nt_name, &file_part, NULL );
-        my_free(filename2);
-    }
-    else if (!ntdll__wcsnicmp(libname, sysdir, sysdirlen - 1))
-    {
-        WCHAR *filename2;
-
-        convert = RtlDosPathNameToNtPathName_U( libname, &nt_name_orig, &file_part, NULL );
-
-        len = strlenW(qemu_sysdir) + strlenW(libname) + 1;
-        filename2 = my_alloc(len * sizeof(*filename2));
-        strcpyW(filename2, qemu_sysdir);
-        strcatW(filename2, libname + sysdirlen);
-
-        WINE_TRACE("Loading %s instead of %s\n", wine_dbgstr_w(filename2), wine_dbgstr_w(libname));
-
-        /* FIXME: File_part? We'll probably only get here if the original path was absolute anyway. */
-        convert = RtlDosPathNameToNtPathName_U( filename2, &nt_name, &file_part, NULL );
-        my_free(filename2);
-    }
+        status = search_dll_file( load_path, libname, nt_name, pwm, handle );
     else
-    {
-        convert = RtlDosPathNameToNtPathName_U( libname, &nt_name, &file_part, NULL );
-    }
+        status = open_dll_file( libname, nt_name, pwm, handle );
 
-    if (!convert)
-    {
-        RtlFreeHeap( GetProcessHeap(), 0, dllname );
-        my_free(sysdir);
-        return STATUS_NO_MEMORY;
-    }
-    if (nt_name_orig.Buffer)
-    {
-        /* Because the loaded DLL list stores the original name we have to call find_fullname_module
-         * with the unmodified name.
-         *
-         * But handling it this way is dead ugly. Try to do this nicer. */
-        len = nt_name_orig.Length - 4*sizeof(WCHAR);  /* for \??\ prefix */
-        if (len >= *size) goto overflow;
-        memcpy( filename, nt_name_orig.Buffer + 4, len + sizeof(WCHAR) );
-        RtlFreeUnicodeString( &nt_name_orig );
-    }
-    else
-    {
-        len = nt_name.Length - 4*sizeof(WCHAR);  /* for \??\ prefix */
-        if (len >= *size) goto overflow;
-        memcpy( filename, nt_name.Buffer + 4, len + sizeof(WCHAR) );
-    }
-    if (!(*pwm = find_fullname_module( filename )) && handle)
-    {
-        attr.Length = sizeof(attr);
-        attr.RootDirectory = 0;
-        attr.Attributes = OBJ_CASE_INSENSITIVE;
-        attr.ObjectName = &nt_name;
-        attr.SecurityDescriptor = NULL;
-        attr.SecurityQualityOfService = NULL;
-        if (NtOpenFile( handle, GENERIC_READ|SYNCHRONIZE, &attr, &io, FILE_SHARE_READ|FILE_SHARE_DELETE, FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE )) *handle = 0;
-    }
-found:
-    RtlFreeUnicodeString( &nt_name );
-    RtlFreeHeap( GetProcessHeap(), 0, dllname );
-    my_free(sysdir);
-    return STATUS_SUCCESS;
+    if (status == STATUS_IMAGE_MACHINE_TYPE_MISMATCH) status = STATUS_INVALID_IMAGE_FORMAT;
 
-overflow:
-    RtlFreeUnicodeString( &nt_name );
+done:
     RtlFreeHeap( GetProcessHeap(), 0, dllname );
-    *size = len + sizeof(WCHAR);
-    my_free(sysdir);
-    return STATUS_BUFFER_TOO_SMALL;
+    return status;
 }
 
 
@@ -2343,27 +2384,14 @@ overflow:
 static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_MODREF** pwm )
 {
     enum loadorder loadorder;
-    WCHAR buffer[64];
-    WCHAR *filename;
-    ULONG size;
+    UNICODE_STRING nt_name;
     WINE_MODREF *main_exe;
     HANDLE handle = 0;
     NTSTATUS nts;
 
     WINE_TRACE( "looking for %s in %s\n", wine_dbgstr_w(libname), wine_dbgstr_w(load_path) );
 
-    *pwm = NULL;
-    filename = buffer;
-    size = sizeof(buffer);
-    for (;;)
-    {
-        nts = find_dll_file( load_path, libname, filename, &size, pwm, &handle );
-        if (nts == STATUS_SUCCESS) break;
-        if (filename != buffer) RtlFreeHeap( GetProcessHeap(), 0, filename );
-        if (nts != STATUS_BUFFER_TOO_SMALL) return nts;
-        /* grow the buffer and retry */
-        if (!(filename = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
-    }
+    nts = find_dll_file( load_path, libname, &nt_name, pwm, &handle );
 
     if (*pwm)  /* found already loaded module */
     {
@@ -2372,16 +2400,18 @@ static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_
         WINE_TRACE("Found %s for %s at %p, count=%d\n",
               wine_dbgstr_w((*pwm)->ldr.FullDllName.Buffer), wine_dbgstr_w(libname),
               (*pwm)->ldr.DllBase, (*pwm)->ldr.LoadCount);
-        if (filename != buffer) RtlFreeHeap( GetProcessHeap(), 0, filename );
+        RtlFreeUnicodeString( &nt_name );
         return STATUS_SUCCESS;
     }
 
+    if (nts && nts != STATUS_DLL_NOT_FOUND && nts != STATUS_INVALID_IMAGE_NOT_MZ) goto done;
+
     main_exe = get_modref( qemu_getTEB()->Peb->ImageBaseAddress );
-    loadorder = get_load_order( main_exe ? main_exe->ldr.BaseDllName.Buffer : NULL, filename );
+    loadorder = get_load_order( main_exe ? main_exe->ldr.BaseDllName.Buffer : NULL, &nt_name );
 
     if (handle && is_fake_dll( handle ))
     {
-        WINE_TRACE( "%s is a fake Wine dll\n", wine_dbgstr_w(filename) );
+        WINE_TRACE( "%s is a fake Wine dll\n", debugstr_us(&nt_name) );
         NtClose( handle );
         handle = 0;
     }
@@ -2399,7 +2429,7 @@ static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_
         if (!handle) nts = STATUS_DLL_NOT_FOUND;
         else
         {
-            nts = load_native_dll( load_path, filename, handle, flags, pwm );
+            nts = load_native_dll( load_path, &nt_name, handle, flags, pwm );
         }
         break;
     case LO_BUILTIN:
@@ -2408,20 +2438,19 @@ static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_
         WINE_ERR("Unexpected codepath.\n");
     }
 
+done:
     if (nts == STATUS_SUCCESS)
     {
-        /* Initialize DLL just loaded */
-        WINE_TRACE("Loaded module %s (%s) at %p\n", wine_dbgstr_w(filename),
+        WINE_TRACE("Loaded module %s (%s) at %p\n", debugstr_us(&nt_name),
               ((*pwm)->ldr.Flags & LDR_WINE_INTERNAL) ? "builtin" : "native",
               (*pwm)->ldr.DllBase);
-        if (handle) NtClose( handle );
-        if (filename != buffer) RtlFreeHeap( GetProcessHeap(), 0, filename );
-        return nts;
     }
-
-    WINE_WARN("Failed to load module %s; status=%x\n", wine_dbgstr_w(libname), nts);
+    else
+    {
+        WINE_WARN("Failed to load module %s; status=%x\n", wine_dbgstr_w(libname), nts);
+    }
     if (handle) NtClose( handle );
-    if (filename != buffer) RtlFreeHeap( GetProcessHeap(), 0, filename );
+    RtlFreeUnicodeString( &nt_name );
     return nts;
 }
 
@@ -2459,37 +2488,25 @@ NTSTATUS qemu_LdrLoadDll(LPCWSTR path_name, DWORD flags,
 NTSTATUS qemu_LdrGetDllHandle( LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base )
 {
     NTSTATUS status;
-    WCHAR buffer[128];
-    WCHAR *filename;
-    ULONG size;
+    UNICODE_STRING nt_name;
     WINE_MODREF *wm;
+    HANDLE handle = 0;
     ULONG_PTR magic;
 
     LdrLockLoaderLock( 0, NULL, &magic );
 
     if (!load_path) load_path = qemu_getTEB()->Peb->ProcessParameters->DllPath.Buffer;
 
-    filename = buffer;
-    size = sizeof(buffer);
-    for (;;)
-    {
-        status = find_dll_file( load_path, name->Buffer, filename, &size, &wm, NULL );
-        if (filename != buffer) RtlFreeHeap( GetProcessHeap(), 0, filename );
-        if (status != STATUS_BUFFER_TOO_SMALL) break;
-        /* grow the buffer and retry */
-        if (!(filename = RtlAllocateHeap( GetProcessHeap(), 0, size )))
-        {
-            status = STATUS_NO_MEMORY;
-            break;
-        }
-    }
+    status = find_dll_file( load_path, name->Buffer, &nt_name, &wm, &handle );
 
     if (status == STATUS_SUCCESS)
     {
         if (wm) *base = wm->ldr.DllBase;
         else status = STATUS_DLL_NOT_FOUND;
     }
+    RtlFreeUnicodeString( &nt_name );
 
+    if (handle) NtClose( handle );
     LdrUnlockLoaderLock( 0, magic );
     WINE_TRACE( "%s -> %p (load path %s)\n", debugstr_us(name), status ? NULL : *base, wine_dbgstr_w(load_path) );
     return status;
