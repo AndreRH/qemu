@@ -23,7 +23,6 @@
 #include "qemu/osdep.h"
 #include "qemu-version.h"
 
-#include <wine/library.h>
 #include <wine/debug.h>
 #include <wine/unicode.h>
 #include <delayloadhandler.h>

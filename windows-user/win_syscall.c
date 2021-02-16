@@ -19,7 +19,6 @@
 #include "config.h"
 
 #include <wine/port.h>
-#include <wine/library.h>
 #include <wine/debug.h>
 
 #include "qemu/osdep.h"
