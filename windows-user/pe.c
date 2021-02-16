@@ -28,7 +28,6 @@
 #include "qemu-version.h"
 
 #include <wine/port.h>
-#include <wine/library.h>
 #include <wine/debug.h>
 #include <wine/unicode.h>
 #include <wine/exception.h>
