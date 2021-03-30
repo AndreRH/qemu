@@ -986,8 +986,12 @@ static void init_process_params(char **argv, const char *filenme)
     /* FIXME: If no explicit title is given WindowTitle and ImagePathName are the same, except
      * that WindowTitle has the .so ending removed. This could be used for a more reliable check.
      *
+     * Some Wine revisions accidentally forget to set it. Check for NULL to avoid crashing to make
+     * bisects through these revisions easier.
+     *
      * Is there a way to catch a case where the title is deliberately set to "qemu-x86_64.exe"? */
-    if (ntdll_wcsstr(NtCurrentTeb()->Peb->ProcessParameters->WindowTitle.Buffer, qemu_x86_64exeW))
+    if (NtCurrentTeb()->Peb->ProcessParameters->WindowTitle.Buffer
+            && ntdll_wcsstr(NtCurrentTeb()->Peb->ProcessParameters->WindowTitle.Buffer, qemu_x86_64exeW))
     {
         RtlCreateUnicodeStringFromAsciiz(&guest_PEB.ProcessParameters->WindowTitle, filename);
     }
