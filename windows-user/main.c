@@ -52,6 +52,7 @@ int (* __cdecl ntdll__wcsicmp)( LPCWSTR str1, LPCWSTR str2 );
 int (* __cdecl ntdll__wcsnicmp)( LPCWSTR str1, LPCWSTR str2, size_t n );
 LPWSTR (* __cdecl ntdll_wcsstr)( LPCWSTR str, LPCWSTR sub );
 ULONG (* __cdecl ntdll_wcstoul)(LPCWSTR s, LPWSTR *end, INT base);
+LPWSTR (* __cdecl ntdll_wcscpy)(LPCWSTR dst, LPCWSTR src);
 
 char *exec_path;
 
@@ -1308,7 +1309,8 @@ int main(int argc, char **argv, char **envp)
     ntdll__wcsnicmp = (void *)GetProcAddress(ntdll_handle, "_wcsnicmp");
     ntdll_wcsstr = (void *)GetProcAddress(ntdll_handle, "wcsstr");
     ntdll_wcstoul = (void *)GetProcAddress(ntdll_handle, "wcstoul");
-    if (!ntdll__wcsicmp || !ntdll__wcsnicmp || !ntdll_wcsstr || !ntdll_wcstoul)
+    ntdll_wcscpy = (void *)GetProcAddress(ntdll_handle, "wcscpy");
+    if (!ntdll__wcsicmp || !ntdll__wcsnicmp || !ntdll_wcsstr || !ntdll_wcstoul || !ntdll_wcscpy)
         WINE_ERR("Required function not found in ntdll.\n");
 
     parallel_cpus = true;
@@ -1327,6 +1329,7 @@ int main(int argc, char **argv, char **envp)
     build_command_line(argv + optind, NtCurrentTeb()->Peb->ProcessParameters);
     RtlUnicodeStringToAnsiString( &ansi, &NtCurrentTeb()->Peb->ProcessParameters->CommandLine, TRUE );
     strcpy(GetCommandLineA(), ansi.Buffer);
+    ntdll_wcscpy(GetCommandLineW(), NtCurrentTeb()->Peb->ProcessParameters->CommandLine.Buffer);
     RtlFreeAnsiString(&ansi);
     WINE_TRACE("Done fixing up cmdline\n");
 
